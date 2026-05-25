@@ -26,6 +26,7 @@ import {
   createHyperWalletClient,
   disableUnifiedAccountMode,
   erc20TransferAbi,
+  loadAgentRole,
   loadCctpFeeQuote,
   loadAccountSnapshot,
   sendUnifiedAsset,
@@ -50,6 +51,7 @@ type SendSource = {
 
 type WithdrawChainId = "arbitrum" | "arbitrum-cctp" | "hyperevm";
 type AccountType = "manual" | "unified" | "portfolio";
+type PortfolioTab = "readonly" | "wallet" | "agent";
 
 type WithdrawChain = {
   id: WithdrawChainId;
@@ -108,11 +110,19 @@ function App() {
   const [sendForm, setSendForm] = useState(emptySend);
   const [depositForm, setDepositForm] = useState({ amount: "" });
   const [withdrawForm, setWithdrawForm] = useState(emptyBridge);
+  const [agentAddressForm, setAgentAddressForm] = useState("");
   const [lookupAddress, setLookupAddress] = useState("");
   const [viewAddress, setViewAddress] = useState<`0x${string}` | null>(null);
+  const [activeTab, setActiveTab] = useState<PortfolioTab>("readonly");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
 
+  const agentRoleQuery = useQuery({
+    queryKey: ["hyperliquid-agent-role", address],
+    queryFn: () => loadAgentRole(address!),
+    enabled: Boolean(address),
+    refetchOnWindowFocus: false,
+  });
   const accountQuery = useQuery({
     queryKey: ["hyperliquid-account", viewAddress],
     queryFn: () => loadAccountSnapshot(viewAddress!),
@@ -127,12 +137,20 @@ function App() {
   const accountType = getAccountType(accountQuery.data?.accountMode.mode);
   const isManualMode = accountType === "manual";
   const isSharedBalanceMode = !isManualMode;
+  const agentMasterAddress = agentRoleQuery.data?.masterAddress ?? null;
   const canSignForViewedAddress = Boolean(
     address &&
       viewAddress &&
-      address.toLowerCase() === viewAddress.toLowerCase(),
+      (address.toLowerCase() === viewAddress.toLowerCase() ||
+        agentMasterAddress?.toLowerCase() === viewAddress.toLowerCase()),
   );
-  const shouldShowClassTransfer = canSignForViewedAddress && isManualMode;
+  const canOperateCurrentView =
+    activeTab !== "readonly" && canSignForViewedAddress;
+  const canDepositCurrentView =
+    activeTab === "wallet" &&
+    Boolean(address && viewAddress) &&
+    address?.toLowerCase() === viewAddress?.toLowerCase();
+  const shouldShowClassTransfer = canOperateCurrentView && isManualMode;
   const selectedWithdrawChain = getWithdrawChain(withdrawForm.chain);
   const withdrawFeeQuery = useQuery({
     queryKey: [
@@ -141,7 +159,7 @@ function App() {
       selectedWithdrawChain.destinationChainId,
     ],
     queryFn: () => loadCctpFeeQuote(selectedWithdrawChain.destinationChainId!),
-    enabled: canSignForViewedAddress && selectedWithdrawChain.kind === "cctp",
+    enabled: canOperateCurrentView && selectedWithdrawChain.kind === "cctp",
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -150,6 +168,7 @@ function App() {
     if (address && !viewAddress && !lookupAddress) {
       setLookupAddress(address);
       setViewAddress(address);
+      setActiveTab("wallet");
     }
   }, [address, lookupAddress, viewAddress]);
 
@@ -179,7 +198,7 @@ function App() {
     if (!canSignForViewedAddress) {
       setNotice({
         kind: "error",
-        text: "Switch back to your connected wallet address before signing actions.",
+        text: "Select your wallet or an authorized master wallet before signing actions.",
       });
       return;
     }
@@ -209,6 +228,7 @@ function App() {
 
     setNotice(null);
     setViewAddress(nextAddress as `0x${string}`);
+    setActiveTab("readonly");
   }
 
   function useConnectedWalletAddress() {
@@ -220,6 +240,29 @@ function App() {
     setNotice(null);
     setLookupAddress(address);
     setViewAddress(address);
+    setActiveTab("wallet");
+  }
+
+  function useAgentMasterAddress() {
+    if (!address) {
+      setNotice({ kind: "error", text: "Connect a wallet first." });
+      return;
+    }
+    if (agentRoleQuery.isLoading) {
+      return;
+    }
+    if (!agentMasterAddress) {
+      setNotice({
+        kind: "error",
+        text: "Connected wallet is not an authorized Hyperliquid Agent Wallet.",
+      });
+      return;
+    }
+
+    setNotice(null);
+    setLookupAddress(agentMasterAddress);
+    setViewAddress(agentMasterAddress);
+    setActiveTab("agent");
   }
 
   async function submitClassTransfer() {
@@ -296,22 +339,32 @@ function App() {
 
   async function submitSetAccountType(nextType: AccountType) {
     await runAction("account-mode", async () => {
+      if (!viewAddress) {
+        throw new Error("Select an account first.");
+      }
       if (nextType === "manual") {
-        await disableUnifiedAccountMode(walletClient!, address!);
+        await disableUnifiedAccountMode(walletClient!, viewAddress);
         return "Manual account activation submitted.";
       }
 
       if (nextType === "portfolio") {
-        await activatePortfolioMarginMode(walletClient!, address!);
+        await activatePortfolioMarginMode(walletClient!, viewAddress);
         return "Portfolio Margin activation submitted.";
       }
 
-      await activateUnifiedAccountMode(walletClient!, address!);
+      await activateUnifiedAccountMode(walletClient!, viewAddress);
       return "Unified Account activation submitted.";
     });
   }
 
   async function submitDeposit() {
+    if (!canDepositCurrentView) {
+      setNotice({
+        kind: "error",
+        text: "Deposits can only be sent to your connected wallet account.",
+      });
+      return;
+    }
     if (!isAtLeastAmount(depositForm.amount, MIN_ARBITRUM_DEPOSIT_USDC)) {
       setNotice({
         kind: "error",
@@ -331,6 +384,24 @@ function App() {
       });
       setDepositForm({ amount: "" });
       return `Deposit transaction sent: ${shortHash(hash)}`;
+    });
+  }
+
+  async function submitApproveAgent() {
+    const agentAddress = agentAddressForm.trim();
+
+    if (!isAddress(agentAddress)) {
+      setNotice({ kind: "error", text: "Enter a valid agent wallet address." });
+      return;
+    }
+
+    await runAction("approve-agent", async () => {
+      const client = createHyperWalletClient(walletClient!);
+      await client.approveAgent({
+        agentAddress: agentAddress as `0x${string}`,
+      });
+      setAgentAddressForm("");
+      return "Unnamed Agent Wallet approved.";
     });
   }
 
@@ -419,38 +490,143 @@ function App() {
         )}
       </header>
 
-      <section className="lookup-band">
-        <label>
-          View portfolio address
-          <input
-            value={lookupAddress}
-            placeholder="0x..."
-            onChange={(event) => setLookupAddress(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                submitLookupAddress();
-              }
-            }}
-          />
-        </label>
-        <div className="lookup-actions">
+      <section className="portfolio-tabs-band">
+        <div className="portfolio-tabs" role="tablist" aria-label="Portfolio view">
           <button
             type="button"
-            className="primary-button"
-            onClick={submitLookupAddress}
+            className={activeTab === "readonly" ? "active" : ""}
+            onClick={() => setActiveTab("readonly")}
           >
-            View Portfolio
+            Read-only address
           </button>
-          {address ? (
+          <button
+            type="button"
+            className={activeTab === "wallet" ? "active" : ""}
+            disabled={!address}
+            onClick={useConnectedWalletAddress}
+          >
+            My wallet
+          </button>
+          <button
+            type="button"
+            className={activeTab === "agent" ? "active" : ""}
+            disabled={!address || agentRoleQuery.isLoading || !agentMasterAddress}
+            onClick={useAgentMasterAddress}
+          >
+            Authorized master
+          </button>
+        </div>
+
+        {activeTab === "readonly" ? (
+          <div className="tab-panel">
+            <label>
+              View portfolio address
+              <input
+                value={lookupAddress}
+                placeholder="0x..."
+                onChange={(event) => setLookupAddress(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    submitLookupAddress();
+                  }
+                }}
+              />
+            </label>
+            <div className="lookup-actions">
+              <button
+                type="button"
+                className="primary-button"
+                onClick={submitLookupAddress}
+              >
+                View Portfolio
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {activeTab === "wallet" ? (
+          <div className="wallet-tab-panel">
+            {address ? (
+              <>
+                <div className="wallet-tab-row">
+                  <div>
+                    <p className="eyebrow">Connected wallet</p>
+                    <strong>{shortAddress(address)}</strong>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={useConnectedWalletAddress}
+                  >
+                    Refresh wallet view
+                  </button>
+                </div>
+                <div className="agent-approval-form">
+                  <label>
+                    Agent wallet address
+                    <input
+                      value={agentAddressForm}
+                      placeholder="0x..."
+                      onChange={(event) =>
+                        setAgentAddressForm(event.target.value)
+                      }
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={busyAction === "approve-agent"}
+                    onClick={submitApproveAgent}
+                  >
+                    Approve Agent
+                  </button>
+                </div>
+                <p className="hint">
+                  This approves the address as the unnamed Hyperliquid Agent
+                  Wallet for your connected wallet.
+                </p>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="primary-button"
+                disabled={!hasWalletConnect}
+                onClick={() => open({ view: "Connect" })}
+              >
+                <Wallet size={16} />
+                Connect Wallet
+              </button>
+            )}
+          </div>
+        ) : null}
+
+        {activeTab === "agent" ? (
+          <div className="tab-panel info-panel">
+            <div>
+              <p className="eyebrow">Authorized master wallet</p>
+              <strong>
+                {agentMasterAddress
+                  ? shortAddress(agentMasterAddress)
+                  : agentRoleQuery.isLoading
+                    ? "Checking..."
+                    : "No authorized master found"}
+              </strong>
+              {agentMasterAddress ? (
+                <p className="hint">
+                  Actions are signed by {shortAddress(address)} as Agent Wallet.
+                </p>
+              ) : null}
+            </div>
             <button
               type="button"
               className="secondary-button"
-              onClick={useConnectedWalletAddress}
+              disabled={!agentMasterAddress}
+              onClick={useAgentMasterAddress}
             >
-              My Wallet
+              View master wallet
             </button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </section>
 
       {notice ? (
@@ -525,12 +701,14 @@ function App() {
               <h2>{getAccountTypeLabel(accountType)}</h2>
               <p className="hint">
                 Viewing {shortAddress(viewAddress)}
-                {canSignForViewedAddress
-                  ? " with signing enabled."
+                {canOperateCurrentView
+                  ? activeTab === "agent"
+                    ? ` with Agent signing from ${shortAddress(address)}.`
+                    : " with signing enabled."
                   : " in read-only mode."}
               </p>
             </div>
-            {canSignForViewedAddress ? (
+            {canOperateCurrentView ? (
               <div className="account-type-control">
                 {(["unified", "portfolio", "manual"] as const).map((type) => (
                   <button
@@ -578,7 +756,7 @@ function App() {
               <PositionsTable data={accountQuery.data} />
             </section>
 
-            {canSignForViewedAddress ? (
+            {canOperateCurrentView ? (
               <>
                 {shouldShowClassTransfer ? (
                   <ActionPanel
@@ -688,36 +866,38 @@ function App() {
               </p>
             </ActionPanel>
 
-            <ActionPanel
-              icon={<ArrowDownToLine size={19} />}
-              title="Deposit from Arbitrum"
-              action={
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={busyAction === "deposit"}
-                  onClick={submitDeposit}
-                >
-                  Deposit
-                </button>
-              }
-            >
-              <label>
-                Amount
-                <input
-                  inputMode="decimal"
-                  value={depositForm.amount}
-                  placeholder="5.00 USDC"
-                  onChange={(event) =>
-                    setDepositForm({ amount: event.target.value })
-                  }
-                />
-              </label>
-              <p className="hint">
-                Sends native Arbitrum USDC to Hyperliquid Bridge2. Minimum
-                deposit is 5 USDC.
-              </p>
-            </ActionPanel>
+            {canDepositCurrentView ? (
+              <ActionPanel
+                icon={<ArrowDownToLine size={19} />}
+                title="Deposit from Arbitrum"
+                action={
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={busyAction === "deposit"}
+                    onClick={submitDeposit}
+                  >
+                    Deposit
+                  </button>
+                }
+              >
+                <label>
+                  Amount
+                  <input
+                    inputMode="decimal"
+                    value={depositForm.amount}
+                    placeholder="5.00 USDC"
+                    onChange={(event) =>
+                      setDepositForm({ amount: event.target.value })
+                    }
+                  />
+                </label>
+                <p className="hint">
+                  Sends native Arbitrum USDC to Hyperliquid Bridge2. Minimum
+                  deposit is 5 USDC.
+                </p>
+              </ActionPanel>
+            ) : null}
 
             <ActionPanel
               icon={<ArrowUpFromLine size={19} />}

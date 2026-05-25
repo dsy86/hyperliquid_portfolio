@@ -130,6 +130,22 @@ export type CctpFeeQuote = {
   finalityThreshold: number;
 };
 
+export type AgentRoleInfo = {
+  role: string;
+  masterAddress: `0x${string}` | null;
+};
+
+export async function loadAgentRole(
+  user: `0x${string}`,
+): Promise<AgentRoleInfo> {
+  const role = await publicClient.userRole({ user });
+
+  return {
+    role: role.role,
+    masterAddress: role.role === "agent" ? role.data.user : null,
+  };
+}
+
 export async function loadAccountSnapshot(
   user: `0x${string}`,
 ): Promise<AccountSnapshot> {

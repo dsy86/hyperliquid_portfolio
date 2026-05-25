@@ -1,8 +1,10 @@
-# Portfolio API 中文文档
+# API 中文文档
+
+## Portfolio API
 
 查询一个 Hyperliquid 账户的余额、当前挂单和 Perps 持仓。
 
-## 请求
+### 请求
 
 ```http
 GET /api/portfolio?address=0x...
@@ -14,15 +16,15 @@ GET /api/portfolio?address=0x...
 https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 ```
 
-### 查询参数
+#### 查询参数
 
 | 名称 | 必填 | 说明 |
 | --- | --- | --- |
 | `address` | 是 | 要查询的 EVM 地址。必须是 42 个字符的 `0x` 地址。 |
 
-## 返回值
+### 返回值
 
-### 成功返回
+#### 成功返回
 
 状态码：`200 OK`
 
@@ -88,9 +90,9 @@ https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 }
 ```
 
-## 字段说明
+### 字段说明
 
-### 顶层字段
+#### 顶层字段
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -101,7 +103,7 @@ https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 | `openOrders` | array | 当前仍然开放的挂单。包含 Spot 和 Perps 挂单；已成交或已取消订单不会出现在这里。 |
 | `perps` | object | Perps 账户汇总和当前持仓。 |
 
-### `summary`
+#### `summary`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -111,7 +113,7 @@ https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 | `withdrawableUsd` | number | 当前可提现金额的 USD 估算。Manual 账户下会合并 Perps 可提现 USDC 和 Spot 可用 USDC。 |
 | `marginUsedUsd` | number | Perps 持仓当前占用的保证金，单位为 USD。 |
 
-### `assets[]`
+#### `assets[]`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -123,7 +125,7 @@ https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 | `priceUsd` | number or null | 用于估值的 USD 价格。`USDC` 固定按 `1` 估值；其他资产优先使用 Hyperliquid Spot 市场价格。 |
 | `valueUsd` | number | `total` 对应的 USD 估算价值。 |
 
-### `openOrders[]`
+#### `openOrders[]`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -139,7 +141,7 @@ https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 | `timestamp` | number | 下单时间，Unix 毫秒时间戳。 |
 | `placedAt` | string | 下单时间，ISO 8601 UTC 字符串。 |
 
-### `openOrders[].market`
+#### `openOrders[].market`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -148,14 +150,14 @@ https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 | `base` | string or null | Base asset 符号。 |
 | `quote` | string or null | Quote asset 符号，通常为 `USDC`。 |
 
-### `perps`
+#### `perps`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `account` | object or null | Manual 账户下的 Perps 账户汇总。Unified 和 Portfolio Margin 账户下为 `null`，因为 Perps 和 Spot 余额已经统一。 |
 | `positions` | array | 当前 Perps 持仓。这些是已经成交形成的仓位，不是挂单。 |
 
-### `perps.account`
+#### `perps.account`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -164,7 +166,7 @@ https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 | `withdrawableUsd` | number | Perps 账户中可提现金额，单位为 USD。 |
 | `marginUsedUsd` | number | 当前 Perps 持仓占用的保证金，单位为 USD。 |
 
-### `perps.positions[]`
+#### `perps.positions[]`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -174,9 +176,9 @@ https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 | `unrealizedPnlUsd` | number | 未实现盈亏，单位为 USD。 |
 | `marginUsedUsd` | number | 该仓位占用的保证金，单位为 USD。 |
 
-## 错误返回
+### 错误返回
 
-### 地址无效
+#### 地址无效
 
 状态码：`400 Bad Request`
 
@@ -187,7 +189,7 @@ https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 }
 ```
 
-### Portfolio 加载失败
+#### Portfolio 加载失败
 
 状态码：`502 Bad Gateway`
 
@@ -199,3 +201,71 @@ https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 ```
 
 这通常表示某个上游 Hyperliquid info 请求失败。
+
+## Agent Role API
+
+查询一个地址是否是 Hyperliquid Agent Wallet；如果是，返回它被授权操作的 Master Wallet。
+
+### 请求
+
+```http
+GET /api/agent-role?address=0x...
+```
+
+生产环境 URL：
+
+```text
+https://hyperliquid-portfolio.pages.dev/api/agent-role?address=0x...
+```
+
+### 查询参数
+
+| 名称 | 必填 | 说明 |
+| --- | --- | --- |
+| `address` | 是 | 要查询的 EVM 地址。必须是 42 个字符的 `0x` 地址。 |
+
+### 成功返回
+
+状态码：`200 OK`
+
+```json
+{
+  "address": "0xAgentWalletAddress",
+  "role": "agent",
+  "masterAddress": "0xMasterWalletAddress"
+}
+```
+
+如果该地址不是 Agent Wallet，`masterAddress` 为 `null`。
+
+### 字段说明
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `address` | string | 被查询的钱包地址。 |
+| `role` | string | 该地址在 Hyperliquid 中的角色，例如 `agent`、`user`、`vault`、`subAccount` 或 `missing`。 |
+| `masterAddress` | string or null | 该 Agent Wallet 被授权操作的 Master Wallet。仅当 `role` 为 `agent` 时有值。 |
+
+### 错误返回
+
+#### 地址无效
+
+状态码：`400 Bad Request`
+
+```json
+{
+  "error": "INVALID_ADDRESS",
+  "message": "Pass a valid EVM address as ?address=0x..."
+}
+```
+
+#### Agent Role 加载失败
+
+状态码：`502 Bad Gateway`
+
+```json
+{
+  "error": "AGENT_ROLE_LOAD_FAILED",
+  "message": "Hyperliquid info request failed: 500"
+}
+```

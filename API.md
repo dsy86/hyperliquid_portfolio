@@ -1,8 +1,10 @@
-# Portfolio API
+# API
+
+## Portfolio API
 
 Read a Hyperliquid account's balances, open orders, and perps positions.
 
-## Request
+### Request
 
 ```http
 GET /api/portfolio?address=0x...
@@ -14,15 +16,15 @@ Production URL:
 https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 ```
 
-### Query Parameters
+#### Query Parameters
 
 | Name | Required | Description |
 | --- | --- | --- |
 | `address` | Yes | EVM address to query. Must be a 42-character `0x` address. |
 
-## Response
+### Response
 
-### Success
+#### Success
 
 Status: `200 OK`
 
@@ -88,9 +90,9 @@ Status: `200 OK`
 }
 ```
 
-## Field Reference
+### Field Reference
 
-### Top-Level Fields
+#### Top-Level Fields
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -101,7 +103,7 @@ Status: `200 OK`
 | `openOrders` | array | Currently open orders. Includes both spot and perps orders. Filled or canceled orders are not included. |
 | `perps` | object | Perps account summary and current open positions. |
 
-### `summary`
+#### `summary`
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -111,7 +113,7 @@ Status: `200 OK`
 | `withdrawableUsd` | number | Estimated USD amount currently withdrawable. For manual accounts, this combines perps withdrawable USDC and available spot USDC. |
 | `marginUsedUsd` | number | Margin currently used by perps positions, in USD. |
 
-### `assets[]`
+#### `assets[]`
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -123,7 +125,7 @@ Status: `200 OK`
 | `priceUsd` | number or null | USD price used for valuation. `USDC` is priced at `1`. Other assets use Hyperliquid spot market prices when available. |
 | `valueUsd` | number | Estimated USD value of `total`. |
 
-### `openOrders[]`
+#### `openOrders[]`
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -139,7 +141,7 @@ Status: `200 OK`
 | `timestamp` | number | Order placement time as a Unix timestamp in milliseconds. |
 | `placedAt` | string | Order placement time as an ISO 8601 UTC timestamp. |
 
-### `openOrders[].market`
+#### `openOrders[].market`
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -148,14 +150,14 @@ Status: `200 OK`
 | `base` | string or null | Base asset symbol. |
 | `quote` | string or null | Quote asset symbol. Usually `USDC`. |
 
-### `perps`
+#### `perps`
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `account` | object or null | Perps account summary for manual accounts. `null` for unified and portfolio-margin accounts because perps and spot balances are unified. |
 | `positions` | array | Current open perps positions. These are already-filled positions, not open orders. |
 
-### `perps.account`
+#### `perps.account`
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -164,7 +166,7 @@ Status: `200 OK`
 | `withdrawableUsd` | number | Withdrawable amount from the perps account in USD. |
 | `marginUsedUsd` | number | Margin used by current perps positions in USD. |
 
-### `perps.positions[]`
+#### `perps.positions[]`
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -174,9 +176,9 @@ Status: `200 OK`
 | `unrealizedPnlUsd` | number | Unrealized profit or loss in USD. |
 | `marginUsedUsd` | number | Margin used by this position in USD. |
 
-## Error Responses
+### Error Responses
 
-### Invalid Address
+#### Invalid Address
 
 Status: `400 Bad Request`
 
@@ -187,7 +189,7 @@ Status: `400 Bad Request`
 }
 ```
 
-### Portfolio Load Failed
+#### Portfolio Load Failed
 
 Status: `502 Bad Gateway`
 
@@ -199,3 +201,71 @@ Status: `502 Bad Gateway`
 ```
 
 This usually means one of the upstream Hyperliquid info requests failed.
+
+## Agent Role API
+
+Resolve whether an address is a Hyperliquid Agent Wallet and, if so, which Master Wallet it is authorized for.
+
+### Request
+
+```http
+GET /api/agent-role?address=0x...
+```
+
+Production URL:
+
+```text
+https://hyperliquid-portfolio.pages.dev/api/agent-role?address=0x...
+```
+
+### Query Parameters
+
+| Name | Required | Description |
+| --- | --- | --- |
+| `address` | Yes | EVM address to query. Must be a 42-character `0x` address. |
+
+### Success
+
+Status: `200 OK`
+
+```json
+{
+  "address": "0xAgentWalletAddress",
+  "role": "agent",
+  "masterAddress": "0xMasterWalletAddress"
+}
+```
+
+If the address is not an Agent Wallet, `masterAddress` is `null`.
+
+### Field Reference
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `address` | string | The queried wallet address. |
+| `role` | string | Hyperliquid role for the address, such as `agent`, `user`, `vault`, `subAccount`, or `missing`. |
+| `masterAddress` | string or null | Master Wallet controlled by this Agent Wallet. Present only when `role` is `agent`. |
+
+### Error Responses
+
+#### Invalid Address
+
+Status: `400 Bad Request`
+
+```json
+{
+  "error": "INVALID_ADDRESS",
+  "message": "Pass a valid EVM address as ?address=0x..."
+}
+```
+
+#### Agent Role Load Failed
+
+Status: `502 Bad Gateway`
+
+```json
+{
+  "error": "AGENT_ROLE_LOAD_FAILED",
+  "message": "Hyperliquid info request failed: 500"
+}
+```
