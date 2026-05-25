@@ -1,0 +1,1145 @@
+import {
+  ArrowDownToLine,
+  ArrowLeftRight,
+  ArrowUpFromLine,
+  Copy,
+  LogOut,
+  RefreshCw,
+  Send,
+  Wallet,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAppKit } from "@reown/appkit/react";
+import {
+  useAccount,
+  useDisconnect,
+  useSwitchChain,
+  useWalletClient,
+} from "wagmi";
+import { parseUnits, isAddress } from "viem";
+import {
+  ARBITRUM_NATIVE_USDC,
+  HYPERLIQUID_BRIDGE2,
+  activatePortfolioMarginMode,
+  activateUnifiedAccountMode,
+  createHyperWalletClient,
+  disableUnifiedAccountMode,
+  erc20TransferAbi,
+  loadCctpFeeQuote,
+  loadAccountSnapshot,
+  sendUnifiedAsset,
+  withdrawToEvmWithData,
+  withdrawToHyperEvm,
+  type AccountSnapshot,
+  type CctpFeeQuote,
+  type WithdrawSourceDex,
+} from "./hyperliquid";
+import { hasWalletConnect, primaryChain } from "./wagmi";
+
+type Notice = {
+  kind: "success" | "error";
+  text: string;
+};
+
+type SendSource = {
+  label: string;
+  value: string;
+  tokenKey: `${string}:0x${string}` | null;
+};
+
+type WithdrawChainId = "arbitrum" | "arbitrum-cctp" | "hyperevm";
+type AccountType = "manual" | "unified" | "portfolio";
+
+type WithdrawChain = {
+  id: WithdrawChainId;
+  label: string;
+  kind: "bridge" | "cctp" | "hyperevm";
+  feeLabel: string;
+  feeHint: string;
+  destinationChainId?: number;
+  signatureChainId?: `0x${string}`;
+};
+
+const emptyTransfer = { amount: "", direction: "spot-to-perp" };
+const emptySend = { source: "perp-usdc", amount: "", destination: "" };
+const emptyBridge = {
+  amount: "",
+  destination: "",
+  chain: "arbitrum" as WithdrawChainId,
+};
+const MIN_ARBITRUM_DEPOSIT_USDC = 5;
+const WITHDRAW_CHAINS: WithdrawChain[] = [
+  {
+    id: "arbitrum",
+    label: "Arbitrum",
+    kind: "bridge",
+    feeLabel: "1 USDC",
+    feeHint: "Legacy Hyperliquid bridge fee, deducted from the withdrawn USDC.",
+  },
+  {
+    id: "arbitrum-cctp",
+    label: "Arbitrum (CCTP)",
+    kind: "cctp",
+    feeLabel: "Loading fee...",
+    feeHint: "Circle CCTP forwarding fee, refreshed from Circle.",
+    destinationChainId: 3,
+    signatureChainId: "0xa4b1",
+  },
+  {
+    id: "hyperevm",
+    label: "HyperEVM",
+    kind: "hyperevm",
+    feeLabel: "No bridge fee",
+    feeHint:
+      "Arrives as USDC on HyperEVM at your connected wallet address. HyperCore token-transfer gas rules may still apply.",
+  },
+];
+
+function App() {
+  const { address, isConnected, chainId } = useAccount();
+  const { open } = useAppKit();
+  const { disconnect } = useDisconnect();
+  const { switchChainAsync } = useSwitchChain();
+  const { data: walletClient } = useWalletClient();
+  const queryClient = useQueryClient();
+
+  const [transferForm, setTransferForm] = useState(emptyTransfer);
+  const [sendForm, setSendForm] = useState(emptySend);
+  const [depositForm, setDepositForm] = useState({ amount: "" });
+  const [withdrawForm, setWithdrawForm] = useState(emptyBridge);
+  const [lookupAddress, setLookupAddress] = useState("");
+  const [viewAddress, setViewAddress] = useState<`0x${string}` | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+
+  const accountQuery = useQuery({
+    queryKey: ["hyperliquid-account", viewAddress],
+    queryFn: () => loadAccountSnapshot(viewAddress!),
+    enabled: Boolean(viewAddress),
+    refetchOnWindowFocus: false,
+  });
+
+  const sendSources = useMemo(
+    () => buildSendSources(accountQuery.data),
+    [accountQuery.data],
+  );
+  const accountType = getAccountType(accountQuery.data?.accountMode.mode);
+  const isManualMode = accountType === "manual";
+  const isSharedBalanceMode = !isManualMode;
+  const canSignForViewedAddress = Boolean(
+    address &&
+      viewAddress &&
+      address.toLowerCase() === viewAddress.toLowerCase(),
+  );
+  const shouldShowClassTransfer = canSignForViewedAddress && isManualMode;
+  const selectedWithdrawChain = getWithdrawChain(withdrawForm.chain);
+  const withdrawFeeQuery = useQuery({
+    queryKey: [
+      "withdraw-fee",
+      selectedWithdrawChain.id,
+      selectedWithdrawChain.destinationChainId,
+    ],
+    queryFn: () => loadCctpFeeQuote(selectedWithdrawChain.destinationChainId!),
+    enabled: canSignForViewedAddress && selectedWithdrawChain.kind === "cctp",
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  useEffect(() => {
+    if (address && !viewAddress && !lookupAddress) {
+      setLookupAddress(address);
+      setViewAddress(address);
+    }
+  }, [address, lookupAddress, viewAddress]);
+
+  useEffect(() => {
+    if (
+      sendSources.length > 0 &&
+      !sendSources.some((source) => source.value === sendForm.source)
+    ) {
+      setSendForm((current) => ({
+        ...current,
+        source: sendSources[0].value,
+      }));
+    }
+  }, [sendForm.source, sendSources]);
+
+  async function ensureArbitrum() {
+    if (chainId !== primaryChain.id) {
+      await switchChainAsync({ chainId: primaryChain.id });
+    }
+  }
+
+  async function runAction(name: string, task: () => Promise<string>) {
+    if (!address || !walletClient) {
+      setNotice({ kind: "error", text: "Connect a wallet first." });
+      return;
+    }
+    if (!canSignForViewedAddress) {
+      setNotice({
+        kind: "error",
+        text: "Switch back to your connected wallet address before signing actions.",
+      });
+      return;
+    }
+
+    setNotice(null);
+    setBusyAction(name);
+    try {
+      await ensureArbitrum();
+      const message = await task();
+      await queryClient.invalidateQueries({
+        queryKey: ["hyperliquid-account", viewAddress],
+      });
+      setNotice({ kind: "success", text: message });
+    } catch (error) {
+      setNotice({ kind: "error", text: getErrorMessage(error) });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function submitLookupAddress() {
+    const nextAddress = lookupAddress.trim();
+    if (!isAddress(nextAddress)) {
+      setNotice({ kind: "error", text: "Enter a valid wallet address." });
+      return;
+    }
+
+    setNotice(null);
+    setViewAddress(nextAddress as `0x${string}`);
+  }
+
+  function useConnectedWalletAddress() {
+    if (!address) {
+      setNotice({ kind: "error", text: "Connect a wallet first." });
+      return;
+    }
+
+    setNotice(null);
+    setLookupAddress(address);
+    setViewAddress(address);
+  }
+
+  async function submitClassTransfer() {
+    if (!isManualMode) {
+      setNotice({
+        kind: "error",
+        text: "Spot / Perps transfer is disabled for this account type.",
+      });
+      return;
+    }
+    if (!isPositiveAmount(transferForm.amount)) {
+      setNotice({ kind: "error", text: "Enter a positive transfer amount." });
+      return;
+    }
+
+    await runAction("class-transfer", async () => {
+      const client = createHyperWalletClient(walletClient!);
+      await client.usdClassTransfer({
+        amount: transferForm.amount,
+        toPerp: transferForm.direction === "spot-to-perp",
+      });
+      setTransferForm(emptyTransfer);
+      return "Transfer submitted.";
+    });
+  }
+
+  async function submitSend() {
+    if (!isAddress(sendForm.destination)) {
+      setNotice({ kind: "error", text: "Enter a valid recipient address." });
+      return;
+    }
+    if (!isPositiveAmount(sendForm.amount)) {
+      setNotice({ kind: "error", text: "Enter a positive send amount." });
+      return;
+    }
+
+    await runAction("send", async () => {
+      const client = createHyperWalletClient(walletClient!);
+      const source = sendSources.find((item) => item.value === sendForm.source);
+
+      if (!source) {
+        throw new Error("Select an asset to send.");
+      }
+
+      if (isSharedBalanceMode) {
+        if (!source.tokenKey) {
+          throw new Error("Select an asset to send.");
+        }
+        await sendUnifiedAsset(walletClient!, {
+          destination: sendForm.destination as `0x${string}`,
+          token: source.tokenKey,
+          amount: sendForm.amount,
+        });
+      } else if (source.value === "perp-usdc") {
+        await client.usdSend({
+          destination: sendForm.destination as `0x${string}`,
+          amount: sendForm.amount,
+        });
+      } else if (source.tokenKey) {
+        await client.spotSend({
+          destination: sendForm.destination as `0x${string}`,
+          token: source.tokenKey,
+          amount: sendForm.amount,
+        });
+      }
+
+      setSendForm({
+        ...emptySend,
+        source: sendSources[0]?.value ?? emptySend.source,
+      });
+      return "Send submitted.";
+    });
+  }
+
+  async function submitSetAccountType(nextType: AccountType) {
+    await runAction("account-mode", async () => {
+      if (nextType === "manual") {
+        await disableUnifiedAccountMode(walletClient!, address!);
+        return "Manual account activation submitted.";
+      }
+
+      if (nextType === "portfolio") {
+        await activatePortfolioMarginMode(walletClient!, address!);
+        return "Portfolio Margin activation submitted.";
+      }
+
+      await activateUnifiedAccountMode(walletClient!, address!);
+      return "Unified Account activation submitted.";
+    });
+  }
+
+  async function submitDeposit() {
+    if (!isAtLeastAmount(depositForm.amount, MIN_ARBITRUM_DEPOSIT_USDC)) {
+      setNotice({
+        kind: "error",
+        text: `Minimum Arbitrum deposit is ${MIN_ARBITRUM_DEPOSIT_USDC} USDC.`,
+      });
+      return;
+    }
+
+    await runAction("deposit", async () => {
+      const hash = await walletClient!.writeContract({
+        address: ARBITRUM_NATIVE_USDC,
+        abi: erc20TransferAbi,
+        functionName: "transfer",
+        args: [HYPERLIQUID_BRIDGE2, parseUnits(depositForm.amount, 6)],
+        account: address!,
+        chain: primaryChain,
+      });
+      setDepositForm({ amount: "" });
+      return `Deposit transaction sent: ${shortHash(hash)}`;
+    });
+  }
+
+  async function submitWithdraw() {
+    if (
+      selectedWithdrawChain.kind !== "hyperevm" &&
+      !isAddress(withdrawForm.destination)
+    ) {
+      setNotice({ kind: "error", text: "Enter a valid destination address." });
+      return;
+    }
+    if (!isPositiveAmount(withdrawForm.amount)) {
+      setNotice({ kind: "error", text: "Enter a positive withdrawal amount." });
+      return;
+    }
+
+    await runAction("withdraw", async () => {
+      const client = createHyperWalletClient(walletClient!);
+      const sourceDex = getWithdrawSourceDex(accountType);
+
+      if (selectedWithdrawChain.kind === "bridge") {
+        await client.withdraw3({
+          destination: withdrawForm.destination as `0x${string}`,
+          amount: withdrawForm.amount,
+        });
+      } else if (selectedWithdrawChain.kind === "cctp") {
+        await withdrawToEvmWithData(walletClient!, {
+          destination: withdrawForm.destination as `0x${string}`,
+          amount: withdrawForm.amount,
+          sourceDex,
+          destinationChainId: selectedWithdrawChain.destinationChainId!,
+          signatureChainId: selectedWithdrawChain.signatureChainId!,
+        });
+      } else {
+        await withdrawToHyperEvm(walletClient!, {
+          amount: withdrawForm.amount,
+          sourceDex,
+        });
+      }
+
+      setWithdrawForm({
+        ...emptyBridge,
+        chain: selectedWithdrawChain.id,
+      });
+      return `Withdrawal to ${selectedWithdrawChain.label} submitted.`;
+    });
+  }
+
+  return (
+    <main className="app">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">HyperCore Portfolio</p>
+          <h1>Manage Hyperliquid balances</h1>
+        </div>
+        {isConnected ? (
+          <div className="wallet-pill">
+            <span>{shortAddress(address)}</span>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Copy address"
+              onClick={() => address && navigator.clipboard.writeText(address)}
+            >
+              <Copy size={16} />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Disconnect wallet"
+              onClick={() => disconnect()}
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={!hasWalletConnect}
+            onClick={() => open({ view: "Connect" })}
+          >
+            <Wallet size={16} />
+            Connect Wallet
+          </button>
+        )}
+      </header>
+
+      <section className="lookup-band">
+        <label>
+          View portfolio address
+          <input
+            value={lookupAddress}
+            placeholder="0x..."
+            onChange={(event) => setLookupAddress(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                submitLookupAddress();
+              }
+            }}
+          />
+        </label>
+        <div className="lookup-actions">
+          <button
+            type="button"
+            className="primary-button"
+            onClick={submitLookupAddress}
+          >
+            View Portfolio
+          </button>
+          {address ? (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={useConnectedWalletAddress}
+            >
+              My Wallet
+            </button>
+          ) : null}
+        </div>
+      </section>
+
+      {notice ? (
+        <div className={`notice ${notice.kind}`}>{notice.text}</div>
+      ) : null}
+
+      {!viewAddress ? (
+        <section className="connect-shell">
+          <div className="connect-action">
+            <button
+              type="button"
+              className="primary-button connect-wallet-button"
+              disabled={!hasWalletConnect}
+              onClick={() => open({ view: "Connect" })}
+            >
+              <Wallet size={18} />
+              Connect Wallet
+            </button>
+            <p className="hint">
+              Or enter any wallet address above to view a read-only portfolio.
+            </p>
+            {!hasWalletConnect ? (
+              <p className="hint">
+                Add `VITE_REOWN_PROJECT_ID` to enable wallet connections.
+              </p>
+            ) : null}
+          </div>
+        </section>
+      ) : (
+        <>
+          <section
+            className={`summary-band ${
+              isManualMode ? "four-metrics" : "three-metrics"
+            }`}
+          >
+            <Metric
+              label={isManualMode ? "Perps account" : "Account value"}
+              value={formatUsd(
+                isManualMode
+                  ? accountQuery.data?.summary.perpAccountValue
+                  : accountQuery.data?.summary.accountValue,
+              )}
+            />
+            {isManualMode ? (
+              <Metric
+                label="Spot account"
+                value={formatUsd(accountQuery.data?.summary.spotAccountValue)}
+              />
+            ) : null}
+            <Metric
+              label="Withdrawable"
+              value={formatUsd(accountQuery.data?.summary.withdrawable)}
+            />
+            <Metric
+              label="Margin used"
+              value={formatUsd(accountQuery.data?.summary.marginUsed)}
+            />
+            <button
+              type="button"
+              className="secondary-button refresh"
+              onClick={() => accountQuery.refetch()}
+              disabled={accountQuery.isFetching}
+            >
+              <RefreshCw size={16} />
+              Refresh
+            </button>
+          </section>
+
+          <section className="mode-band">
+            <div>
+              <p className="eyebrow">Account mode</p>
+              <h2>{getAccountTypeLabel(accountType)}</h2>
+              <p className="hint">
+                Viewing {shortAddress(viewAddress)}
+                {canSignForViewedAddress
+                  ? " with signing enabled."
+                  : " in read-only mode."}
+              </p>
+            </div>
+            {canSignForViewedAddress ? (
+              <div className="account-type-control">
+                {(["unified", "portfolio", "manual"] as const).map((type) => (
+                  <button
+                    type="button"
+                    key={type}
+                    className={accountType === type ? "active" : ""}
+                    disabled={
+                      busyAction === "account-mode" ||
+                      accountQuery.isLoading ||
+                      accountType === type
+                    }
+                    onClick={() => submitSetAccountType(type)}
+                  >
+                    {getAccountTypeLabel(type)}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <span className="readonly-pill">Read-only</span>
+            )}
+          </section>
+
+          <section className="content-grid">
+            <section className="panel balances-panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">Balances</p>
+                  <h2>{getBalancesTitle(accountType)}</h2>
+                </div>
+              </div>
+              <BalancesTable
+                data={accountQuery.data}
+                isLoading={accountQuery.isLoading}
+                error={accountQuery.error}
+              />
+            </section>
+
+            <section className="panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">Perps</p>
+                  <h2>Open positions</h2>
+                </div>
+              </div>
+              <PositionsTable data={accountQuery.data} />
+            </section>
+
+            {canSignForViewedAddress ? (
+              <>
+                {shouldShowClassTransfer ? (
+                  <ActionPanel
+                    icon={<ArrowLeftRight size={19} />}
+                    title="Spot / Perps transfer"
+                    action={
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={busyAction === "class-transfer"}
+                        onClick={submitClassTransfer}
+                      >
+                        Transfer
+                      </button>
+                    }
+                  >
+                    <label>
+                      Amount
+                      <input
+                        inputMode="decimal"
+                        value={transferForm.amount}
+                        placeholder="0.00 USDC"
+                        onChange={(event) =>
+                          setTransferForm({
+                            ...transferForm,
+                            amount: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Direction
+                      <select
+                        value={transferForm.direction}
+                        onChange={(event) =>
+                          setTransferForm({
+                            ...transferForm,
+                            direction: event.target.value,
+                          })
+                        }
+                      >
+                        <option value="spot-to-perp">Spot to Perps</option>
+                        <option value="perp-to-spot">Perps to Spot</option>
+                      </select>
+                    </label>
+                  </ActionPanel>
+                ) : null}
+
+            <ActionPanel
+              icon={<Send size={19} />}
+              title="Send asset"
+              action={
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={busyAction === "send" || sendSources.length === 0}
+                  onClick={submitSend}
+                >
+                  Send
+                </button>
+              }
+            >
+              <label>
+                {isSharedBalanceMode ? "Asset" : "Source"}
+                <select
+                  value={sendForm.source}
+                  disabled={sendSources.length === 0}
+                  onChange={(event) =>
+                    setSendForm({ ...sendForm, source: event.target.value })
+                  }
+                >
+                  {sendSources.map((source) => (
+                    <option value={source.value} key={source.value}>
+                      {source.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Recipient
+                <input
+                  value={sendForm.destination}
+                  placeholder="0x..."
+                  onChange={(event) =>
+                    setSendForm({
+                      ...sendForm,
+                      destination: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Amount
+                <input
+                  inputMode="decimal"
+                  value={sendForm.amount}
+                  placeholder="0.00"
+                  onChange={(event) =>
+                    setSendForm({ ...sendForm, amount: event.target.value })
+                  }
+                />
+              </label>
+              <p className="hint">
+                HyperCore may charge a one-time 1 USDC activation gas fee when
+                sending to an unused address. This is paid from your HyperCore
+                USDC balance, not wallet network gas.
+              </p>
+            </ActionPanel>
+
+            <ActionPanel
+              icon={<ArrowDownToLine size={19} />}
+              title="Deposit from Arbitrum"
+              action={
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={busyAction === "deposit"}
+                  onClick={submitDeposit}
+                >
+                  Deposit
+                </button>
+              }
+            >
+              <label>
+                Amount
+                <input
+                  inputMode="decimal"
+                  value={depositForm.amount}
+                  placeholder="5.00 USDC"
+                  onChange={(event) =>
+                    setDepositForm({ amount: event.target.value })
+                  }
+                />
+              </label>
+              <p className="hint">
+                Sends native Arbitrum USDC to Hyperliquid Bridge2. Minimum
+                deposit is 5 USDC.
+              </p>
+            </ActionPanel>
+
+            <ActionPanel
+              icon={<ArrowUpFromLine size={19} />}
+              title={`Withdraw to ${selectedWithdrawChain.label}`}
+              action={
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={busyAction === "withdraw"}
+                  onClick={submitWithdraw}
+                >
+                  Withdraw
+                </button>
+              }
+            >
+              <label>
+                Asset
+                <select value="USDC" disabled>
+                  <option value="USDC">USDC</option>
+                </select>
+              </label>
+              <label>
+                Withdrawal chain
+                <select
+                  value={withdrawForm.chain}
+                  onChange={(event) =>
+                    setWithdrawForm({
+                      ...withdrawForm,
+                      chain: event.target.value as WithdrawChainId,
+                    })
+                  }
+                >
+                  {WITHDRAW_CHAINS.map((chain) => (
+                    <option value={chain.id} key={chain.id}>
+                      {chain.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="fee-summary">
+                <div>
+                  <span>Fee</span>
+                  <strong>
+                    {formatWithdrawFee(selectedWithdrawChain, withdrawFeeQuery)}
+                  </strong>
+                </div>
+                <p>{getWithdrawFeeHint(selectedWithdrawChain, withdrawFeeQuery)}</p>
+              </div>
+              {selectedWithdrawChain.kind === "hyperevm" ? (
+                <p className="hint">
+                  HyperEVM withdrawals are sent to your connected wallet address.
+                </p>
+              ) : (
+                <label>
+                  Destination
+                  <input
+                    value={withdrawForm.destination}
+                    placeholder="0x..."
+                    onChange={(event) =>
+                      setWithdrawForm({
+                        ...withdrawForm,
+                        destination: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+              )}
+              <label>
+                Amount
+                <input
+                  inputMode="decimal"
+                  value={withdrawForm.amount}
+                  placeholder="0.00 USDC"
+                  onChange={(event) =>
+                    setWithdrawForm({
+                      ...withdrawForm,
+                      amount: event.target.value,
+                    })
+                  }
+                />
+              </label>
+            </ActionPanel>
+              </>
+            ) : null}
+          </section>
+        </>
+      )}
+    </main>
+  );
+}
+
+function ActionPanel({
+  icon,
+  title,
+  action,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  action: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="panel action-panel">
+      <div className="panel-heading">
+        <div className="panel-title">
+          <span className="icon-wrap">{icon}</span>
+          <h2>{title}</h2>
+        </div>
+      </div>
+      <div className="form-stack">{children}</div>
+      <div className="form-actions">{action}</div>
+    </section>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function BalancesTable({
+  data,
+  isLoading,
+  error,
+}: {
+  data?: AccountSnapshot;
+  isLoading: boolean;
+  error: Error | null;
+}) {
+  if (isLoading) {
+    return <div className="empty-state">Loading balances...</div>;
+  }
+  if (error) {
+    return <div className="empty-state error-text">{error.message}</div>;
+  }
+  if (!data) {
+    return <div className="empty-state">No spot balances found.</div>;
+  }
+
+  const accountType = getAccountType(data.accountMode.mode);
+  const isManualAccount = accountType === "manual";
+  const isPortfolioAccount = accountType === "portfolio";
+
+  return (
+    <div className="balance-sections">
+      {isManualAccount ? (
+        <section className="balance-section">
+          <h3>Perps account</h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Account value</th>
+                  <th>Withdrawable</th>
+                  <th>Margin used</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <strong>USDC</strong>
+                  </td>
+                  <td>{formatUsd(data.perp.accountValue)}</td>
+                  <td>{formatUsd(data.perp.withdrawable)}</td>
+                  <td>{formatUsd(data.perp.marginUsed)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {isPortfolioAccount ? (
+        <section className="balance-section">
+          <h3>Portfolio margin summary</h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Account value</th>
+                  <th>Withdrawable</th>
+                  <th>Margin used</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>{formatUsd(data.summary.accountValue)}</td>
+                  <td>{formatUsd(data.summary.withdrawable)}</td>
+                  <td>{formatUsd(data.summary.marginUsed)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="balance-section">
+        {isManualAccount ? <h3>Spot assets</h3> : null}
+        {data.spotBalances.length ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Total</th>
+                  <th>Available</th>
+                  <th>Hold</th>
+                  <th>Entry</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.spotBalances.map((balance) => (
+                  <tr key={`${balance.coin}-${balance.tokenId ?? balance.total}`}>
+                    <td>
+                      <strong>{balance.coin}</strong>
+                    </td>
+                    <td>{formatNumber(balance.total)}</td>
+                    <td>{formatNumber(balance.available)}</td>
+                    <td>{formatNumber(balance.hold)}</td>
+                    <td>{formatUsd(balance.entryNtl)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-state">No spot balances found.</div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function PositionsTable({ data }: { data?: AccountSnapshot }) {
+  if (!data?.positions.length) {
+    return <div className="empty-state">No open perps positions.</div>;
+  }
+
+  return (
+    <div className="table-wrap compact">
+      <table>
+        <thead>
+          <tr>
+            <th>Market</th>
+            <th>Size</th>
+            <th>Value</th>
+            <th>PNL</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.positions.map((position) => (
+            <tr key={position.coin}>
+              <td>
+                <strong>{position.coin}</strong>
+              </td>
+              <td>{formatNumber(position.size)}</td>
+              <td>{formatUsd(position.value)}</td>
+              <td className={Number(position.pnl) >= 0 ? "green" : "red"}>
+                {formatUsd(position.pnl)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function getWithdrawChain(id: WithdrawChainId) {
+  return WITHDRAW_CHAINS.find((chain) => chain.id === id) ?? WITHDRAW_CHAINS[0];
+}
+
+function getAccountType(mode?: AccountSnapshot["accountMode"]["mode"]): AccountType {
+  if (mode === "portfolioMargin") {
+    return "portfolio";
+  }
+  if (mode === "unifiedAccount") {
+    return "unified";
+  }
+  return "manual";
+}
+
+function getAccountTypeLabel(type: AccountType) {
+  if (type === "portfolio") {
+    return "Portfolio Margin";
+  }
+  if (type === "unified") {
+    return "Unified Account";
+  }
+  return "Manual";
+}
+
+function getBalancesTitle(type: AccountType) {
+  if (type === "portfolio") {
+    return "Portfolio margin assets";
+  }
+  if (type === "unified") {
+    return "Unified assets";
+  }
+  return "Account assets";
+}
+
+function getWithdrawSourceDex(type: AccountType): WithdrawSourceDex {
+  return type === "manual" ? "" : "spot";
+}
+
+function formatWithdrawFee(
+  chain: WithdrawChain,
+  feeQuery: {
+    data?: CctpFeeQuote;
+    isLoading: boolean;
+    isError: boolean;
+  },
+) {
+  if (chain.kind !== "cctp") {
+    return chain.feeLabel;
+  }
+
+  if (feeQuery.isLoading) {
+    return chain.feeLabel;
+  }
+
+  if (feeQuery.isError || !feeQuery.data) {
+    return "Fee unavailable";
+  }
+
+  return `~${formatUsdcFee(feeQuery.data.forwardFeeUsdc)} USDC`;
+}
+
+function getWithdrawFeeHint(
+  chain: WithdrawChain,
+  feeQuery: {
+    data?: CctpFeeQuote;
+    isError: boolean;
+  },
+) {
+  if (chain.kind !== "cctp") {
+    return chain.feeHint;
+  }
+
+  if (feeQuery.isError || !feeQuery.data) {
+    return "Circle fee lookup failed. The withdrawal can still be signed, but the fee may differ.";
+  }
+
+  return `${chain.feeHint} Minimum fee: ${feeQuery.data.minimumFeeBps} bps.`;
+}
+
+function buildSendSources(data?: AccountSnapshot): SendSource[] {
+  const accountType = getAccountType(data?.accountMode.mode);
+  const isManualAccount = accountType === "manual";
+  const sources: SendSource[] = isManualAccount
+    ? [{ label: "USDC Perps balance", value: "perp-usdc", tokenKey: null }]
+    : [];
+
+  data?.spotBalances.forEach((balance) => {
+    if (balance.tokenKey && Number(balance.total) > 0) {
+      sources.push({
+        label: isManualAccount ? `${balance.coin} Spot balance` : balance.coin,
+        value: balance.tokenKey,
+        tokenKey: balance.tokenKey,
+      });
+    }
+  });
+
+  return sources;
+}
+
+function isPositiveAmount(value: string) {
+  return value.trim() !== "" && Number(value) > 0;
+}
+
+function isAtLeastAmount(value: string, minimum: number) {
+  return value.trim() !== "" && Number(value) >= minimum;
+}
+
+function formatNumber(value?: string) {
+  const numeric = Number(value ?? 0);
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: numeric >= 1 ? 4 : 8,
+  }).format(numeric);
+}
+
+function formatUsdcFee(value?: string) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 6,
+  }).format(Number(value ?? 0));
+}
+
+function formatUsd(value?: string) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(Number(value ?? 0));
+}
+
+function shortAddress(value?: string) {
+  return value ? `${value.slice(0, 6)}...${value.slice(-4)}` : "";
+}
+
+function shortHash(value: string) {
+  return `${value.slice(0, 10)}...${value.slice(-6)}`;
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    if (
+      error.message.includes(
+        "Insufficient USDC balance for token transfer gas",
+      )
+    ) {
+      return "Insufficient USDC balance for HyperCore token transfer gas. Keep at least 1 extra USDC available for the one-time activation gas fee when sending to an unused address.";
+    }
+    return error.message;
+  }
+  return "Action failed.";
+}
+
+export default App;
