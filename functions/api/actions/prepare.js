@@ -1,7 +1,7 @@
 const HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info";
 const HYPERLIQUID_CHAIN = "Mainnet";
 const SIGNATURE_CHAIN_ID = "0xa4b1";
-const AGENT_NAME_PREFIX = "hyperliquid-portfolio";
+const AGENT_NAME_PREFIX = "hlp";
 const AGENT_VALID_FOR_MS = (180 * 24 * 60 - 10) * 60 * 1000;
 const HYPEREVM_USDC_SYSTEM_ADDRESS =
   "0x2000000000000000000000000000000000000000";
