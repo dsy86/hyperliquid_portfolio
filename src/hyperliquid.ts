@@ -71,7 +71,7 @@ export type OpenOrderRow = {
 export type AgentWalletRow = {
   address: `0x${string}`;
   name: string;
-  validUntil: number;
+  validUntil: number | null;
   validUntilIso: string | null;
 };
 

@@ -141,7 +141,7 @@ GET /api/snapshot?address=0x...
 | `perp` | object | Hyperliquid clearinghouse state 返回的 Perps 账户汇总。 |
 | `positions[]` | array | 当前 Perps 持仓。它们是已成交形成的仓位，不是挂单。 |
 | `openOrders[]` | array | 当前开放的 Spot 和 Perps 挂单；已成交或已取消订单不包含在内。 |
-| `agents[]` | array | 当前查询钱包已授权的 Agent Wallet 列表。 |
+| `agents[]` | array | 当前查询钱包已授权的 Agent Wallet 列表。包含 `webData3` 返回的 unnamed API Wallet，以及 `extraAgents` 返回的 named agents。 |
 
 #### `spotBalances[]`
 
@@ -192,7 +192,7 @@ GET /api/snapshot?address=0x...
 | --- | --- | --- |
 | `address` | string | 已授权的 Agent Wallet 地址。 |
 | `name` | string | Agent 名称。空字符串表示 unnamed。 |
-| `validUntil` | number | 授权过期时间，Unix 毫秒时间戳。 |
+| `validUntil` | number or null | 授权过期时间，Unix 毫秒时间戳。 |
 | `validUntilIso` | string or null | 授权过期时间的 ISO 8601 UTC 字符串；无法解析时为 `null`。 |
 
 ### 错误

@@ -141,7 +141,7 @@ GET /api/snapshot?address=0x...
 | `perp` | object | Perps account summary as returned by Hyperliquid clearinghouse state. |
 | `positions[]` | array | Current perps positions. These are filled positions, not open orders. |
 | `openOrders[]` | array | Currently open spot and perps orders. Filled and canceled orders are not included. |
-| `agents[]` | array | Agent Wallets currently approved by the queried wallet. |
+| `agents[]` | array | Agent Wallets currently approved by the queried wallet. Includes the unnamed API Wallet from `webData3` and named agents from `extraAgents`. |
 
 #### `spotBalances[]`
 
@@ -192,7 +192,7 @@ GET /api/snapshot?address=0x...
 | --- | --- | --- |
 | `address` | string | Approved Agent Wallet address. |
 | `name` | string | Agent name. Empty string means unnamed. |
-| `validUntil` | number | Expiration timestamp in milliseconds. |
+| `validUntil` | number or null | Expiration timestamp in milliseconds. |
 | `validUntilIso` | string or null | ISO 8601 UTC expiration timestamp when available. |
 
 ### Errors

@@ -1712,8 +1712,8 @@ function formatDateTime(value: number) {
   }).format(new Date(value));
 }
 
-function formatAgentValidUntil(value: number) {
-  if (!Number.isFinite(value) || value <= 0) {
+function formatAgentValidUntil(value: number | null) {
+  if (value === null || !Number.isFinite(value) || value <= 0) {
     return "No expiry";
   }
   return `Valid until ${formatDateTime(value)}`;

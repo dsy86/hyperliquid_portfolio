@@ -37,7 +37,7 @@ async function loadSnapshot(user) {
     loadAccountMode(user),
     postInfo({ type: "openOrders", user }),
     postInfo({ type: "meta" }),
-    loadExtraAgents(user),
+    loadAgents(user),
   ]);
   const [spotMeta, spotAssetCtxs] = spotMetaAndAssetCtxs;
   const tokenByIndex = new Map(spotMeta.tokens.map((token) => [token.index, token]));
@@ -120,23 +120,59 @@ async function loadSnapshot(user) {
   };
 }
 
+async function loadAgents(user) {
+  const [unnamedAgent, namedAgents] = await Promise.all([
+    loadUnnamedAgent(user),
+    loadExtraAgents(user),
+  ]);
+  const agentsByAddress = new Map();
+
+  [unnamedAgent, ...namedAgents].forEach((agent) => {
+    if (agent?.address) {
+      agentsByAddress.set(agent.address.toLowerCase(), agent);
+    }
+  });
+
+  return Array.from(agentsByAddress.values());
+}
+
+async function loadUnnamedAgent(user) {
+  try {
+    const webData = await postInfo({ type: "webData3", user });
+    const address = webData.userState?.agentAddress;
+    const validUntil = webData.userState?.agentValidUntil ?? null;
+
+    return address
+      ? {
+          address,
+          name: "",
+          validUntil,
+          validUntilIso:
+            typeof validUntil === "number" ? new Date(validUntil).toISOString() : null,
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function loadExtraAgents(user) {
   try {
     const agents = await postInfo({ type: "extraAgents", user });
-    return Array.isArray(agents)
-      ? agents.map((agent) => ({
-          address: agent.address,
-          name: agent.name ?? "",
-          validUntil: agent.validUntil,
-          validUntilIso:
-            typeof agent.validUntil === "number"
-              ? new Date(agent.validUntil).toISOString()
-              : null,
-        }))
-      : [];
+    return Array.isArray(agents) ? agents.map(normalizeAgent) : [];
   } catch {
     return [];
   }
+}
+
+function normalizeAgent(agent) {
+  return {
+    address: agent.address,
+    name: agent.name ?? "",
+    validUntil: agent.validUntil ?? null,
+    validUntilIso:
+      typeof agent.validUntil === "number" ? new Date(agent.validUntil).toISOString() : null,
+  };
 }
 
 function normalizeOpenOrder(order, spotMeta, perpsMeta) {
