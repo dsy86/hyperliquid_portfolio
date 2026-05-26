@@ -1009,181 +1009,200 @@ function App() {
                   </ActionPanel>
                 ) : null}
 
-            <ActionPanel
-              icon={<Send size={19} />}
-              title="Send asset"
-              action={
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={busyAction === "send" || sendSources.length === 0}
-                  onClick={submitSend}
-                >
-                  Send
-                </button>
-              }
-            >
-              <label>
-                {isSharedBalanceMode ? "Asset" : "Source"}
-                <select
-                  value={sendForm.source}
-                  disabled={sendSources.length === 0}
-                  onChange={(event) =>
-                    setSendForm({ ...sendForm, source: event.target.value })
-                  }
-                >
-                  {sendSources.map((source) => (
-                    <option value={source.value} key={source.value}>
-                      {source.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Recipient
-                <input
-                  value={sendForm.destination}
-                  placeholder="0x..."
-                  onChange={(event) =>
-                    setSendForm({
-                      ...sendForm,
-                      destination: event.target.value,
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Amount
-                <input
-                  inputMode="decimal"
-                  value={sendForm.amount}
-                  placeholder="0.00"
-                  onChange={(event) =>
-                    setSendForm({ ...sendForm, amount: event.target.value })
-                  }
-                />
-              </label>
-              <p className="hint">
-                HyperCore may charge a one-time 1 USDC activation gas fee when
-                sending to an unused address. This is paid from your HyperCore
-                USDC balance, not wallet network gas.
-              </p>
-            </ActionPanel>
-
-            {canDepositCurrentView ? (
-              <ActionPanel
-                icon={<ArrowDownToLine size={19} />}
-                title="Deposit from Arbitrum"
-                action={
-                  <button
-                    type="button"
-                    className="primary-button"
-                    disabled={busyAction === "deposit"}
-                    onClick={submitDeposit}
+                <section className="funding-actions-grid">
+                  <ActionPanel
+                    icon={<Send size={19} />}
+                    title="Send asset"
+                    action={
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={
+                          busyAction === "send" || sendSources.length === 0
+                        }
+                        onClick={submitSend}
+                      >
+                        Send
+                      </button>
+                    }
                   >
-                    Deposit
-                  </button>
-                }
-              >
-                <label>
-                  Amount
-                  <input
-                    inputMode="decimal"
-                    value={depositForm.amount}
-                    placeholder="5.00 USDC"
-                    onChange={(event) =>
-                      setDepositForm({ amount: event.target.value })
-                    }
-                  />
-                </label>
-                <p className="hint">
-                  Sends native Arbitrum USDC to Hyperliquid Bridge2. Minimum
-                  deposit is 5 USDC.
-                </p>
-              </ActionPanel>
-            ) : null}
+                    <label>
+                      {isSharedBalanceMode ? "Asset" : "Source"}
+                      <select
+                        value={sendForm.source}
+                        disabled={sendSources.length === 0}
+                        onChange={(event) =>
+                          setSendForm({
+                            ...sendForm,
+                            source: event.target.value,
+                          })
+                        }
+                      >
+                        {sendSources.map((source) => (
+                          <option value={source.value} key={source.value}>
+                            {source.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Recipient
+                      <input
+                        value={sendForm.destination}
+                        placeholder="0x..."
+                        onChange={(event) =>
+                          setSendForm({
+                            ...sendForm,
+                            destination: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Amount
+                      <input
+                        inputMode="decimal"
+                        value={sendForm.amount}
+                        placeholder="0.00"
+                        onChange={(event) =>
+                          setSendForm({
+                            ...sendForm,
+                            amount: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <p className="hint">
+                      HyperCore may charge a one-time 1 USDC activation gas fee
+                      when sending to an unused address. This is paid from your
+                      HyperCore USDC balance, not wallet network gas.
+                    </p>
+                  </ActionPanel>
 
-            <ActionPanel
-              icon={<ArrowUpFromLine size={19} />}
-              title={`Withdraw to ${selectedWithdrawChain.label}`}
-              action={
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={busyAction === "withdraw"}
-                  onClick={submitWithdraw}
-                >
-                  Withdraw
-                </button>
-              }
-            >
-              <label>
-                Asset
-                <select value="USDC" disabled>
-                  <option value="USDC">USDC</option>
-                </select>
-              </label>
-              <label>
-                Withdrawal chain
-                <select
-                  value={withdrawForm.chain}
-                  onChange={(event) =>
-                    setWithdrawForm({
-                      ...withdrawForm,
-                      chain: event.target.value as WithdrawChainId,
-                    })
-                  }
-                >
-                  {WITHDRAW_CHAINS.map((chain) => (
-                    <option value={chain.id} key={chain.id}>
-                      {chain.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="fee-summary">
-                <div>
-                  <span>Fee</span>
-                  <strong>
-                    {formatWithdrawFee(selectedWithdrawChain, withdrawFeeQuery)}
-                  </strong>
-                </div>
-                <p>{getWithdrawFeeHint(selectedWithdrawChain, withdrawFeeQuery)}</p>
-              </div>
-              {selectedWithdrawChain.kind === "hyperevm" ? (
-                <p className="hint">
-                  HyperEVM withdrawals are sent to your connected wallet address.
-                </p>
-              ) : (
-                <label>
-                  Destination
-                  <input
-                    value={withdrawForm.destination}
-                    placeholder="0x..."
-                    onChange={(event) =>
-                      setWithdrawForm({
-                        ...withdrawForm,
-                        destination: event.target.value,
-                      })
+                  {canDepositCurrentView ? (
+                    <ActionPanel
+                      icon={<ArrowDownToLine size={19} />}
+                      title="Deposit from Arbitrum"
+                      action={
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={busyAction === "deposit"}
+                          onClick={submitDeposit}
+                        >
+                          Deposit
+                        </button>
+                      }
+                    >
+                      <label>
+                        Amount
+                        <input
+                          inputMode="decimal"
+                          value={depositForm.amount}
+                          placeholder="5.00 USDC"
+                          onChange={(event) =>
+                            setDepositForm({ amount: event.target.value })
+                          }
+                        />
+                      </label>
+                      <p className="hint">
+                        Sends native Arbitrum USDC to Hyperliquid Bridge2.
+                        Minimum deposit is 5 USDC.
+                      </p>
+                    </ActionPanel>
+                  ) : null}
+
+                  <ActionPanel
+                    icon={<ArrowUpFromLine size={19} />}
+                    title="Withdraw"
+                    action={
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={busyAction === "withdraw"}
+                        onClick={submitWithdraw}
+                      >
+                        Withdraw
+                      </button>
                     }
-                  />
-                </label>
-              )}
-              <label>
-                Amount
-                <input
-                  inputMode="decimal"
-                  value={withdrawForm.amount}
-                  placeholder="0.00 USDC"
-                  onChange={(event) =>
-                    setWithdrawForm({
-                      ...withdrawForm,
-                      amount: event.target.value,
-                    })
-                  }
-                />
-              </label>
-            </ActionPanel>
+                  >
+                    <label>
+                      Asset
+                      <select value="USDC" disabled>
+                        <option value="USDC">USDC</option>
+                      </select>
+                    </label>
+                    <label>
+                      Withdrawal chain
+                      <select
+                        value={withdrawForm.chain}
+                        onChange={(event) =>
+                          setWithdrawForm({
+                            ...withdrawForm,
+                            chain: event.target.value as WithdrawChainId,
+                          })
+                        }
+                      >
+                        {WITHDRAW_CHAINS.map((chain) => (
+                          <option value={chain.id} key={chain.id}>
+                            {chain.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="fee-summary">
+                      <div>
+                        <span>Fee</span>
+                        <strong>
+                          {formatWithdrawFee(
+                            selectedWithdrawChain,
+                            withdrawFeeQuery,
+                          )}
+                        </strong>
+                      </div>
+                      <p>
+                        {getWithdrawFeeHint(
+                          selectedWithdrawChain,
+                          withdrawFeeQuery,
+                        )}
+                      </p>
+                    </div>
+                    {selectedWithdrawChain.kind === "hyperevm" ? (
+                      <p className="hint">
+                        HyperEVM withdrawals are sent to your connected wallet
+                        address.
+                      </p>
+                    ) : (
+                      <label>
+                        Destination
+                        <input
+                          value={withdrawForm.destination}
+                          placeholder="0x..."
+                          onChange={(event) =>
+                            setWithdrawForm({
+                              ...withdrawForm,
+                              destination: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                    )}
+                    <label>
+                      Amount
+                      <input
+                        inputMode="decimal"
+                        value={withdrawForm.amount}
+                        placeholder="0.00 USDC"
+                        onChange={(event) =>
+                          setWithdrawForm({
+                            ...withdrawForm,
+                            amount: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                  </ActionPanel>
+                </section>
               </>
             ) : null}
           </section>

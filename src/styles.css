@@ -424,6 +424,13 @@ h2 {
   grid-column: span 2;
 }
 
+.funding-actions-grid {
+  display: grid;
+  grid-column: span 2;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+}
+
 .panel-heading {
   display: flex;
   align-items: center;
@@ -684,6 +691,7 @@ select:focus {
   .account-tools-grid,
   .metrics-grid.three-metrics,
   .metrics-grid.four-metrics,
+  .funding-actions-grid,
   .content-grid {
     grid-template-columns: 1fr;
   }
@@ -707,6 +715,10 @@ select:focus {
   }
 
   .perps-panel {
+    grid-column: auto;
+  }
+
+  .funding-actions-grid {
     grid-column: auto;
   }
 
