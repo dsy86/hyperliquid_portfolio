@@ -73,6 +73,7 @@ const emptyBridge = {
   chain: "arbitrum" as WithdrawChainId,
 };
 const PRIVATE_KEY_PATTERN = /^0x[a-fA-F0-9]{64}$/;
+const READONLY_ADDRESS_STORAGE_KEY = "hypercore.readonlyAddress";
 const MIN_ARBITRUM_DEPOSIT_USDC = 5;
 const WITHDRAW_CHAINS: WithdrawChain[] = [
   {
@@ -117,8 +118,12 @@ function App() {
   const [depositForm, setDepositForm] = useState({ amount: "" });
   const [withdrawForm, setWithdrawForm] = useState(emptyBridge);
   const [agentAddressForm, setAgentAddressForm] = useState("");
-  const [lookupAddress, setLookupAddress] = useState("");
-  const [viewAddress, setViewAddress] = useState<`0x${string}` | null>(null);
+  const [lookupAddress, setLookupAddress] = useState(
+    () => getStoredReadonlyAddress() ?? "",
+  );
+  const [viewAddress, setViewAddress] = useState<`0x${string}` | null>(
+    () => getStoredReadonlyAddress(),
+  );
   const [activeTab, setActiveTab] = useState<PortfolioTab>("readonly");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -153,6 +158,8 @@ function App() {
   const isManualMode = accountType === "manual";
   const isSharedBalanceMode = !isManualMode;
   const agentMasterAddress = agentRoleQuery.data?.masterAddress ?? null;
+  const shouldShowAgentTab =
+    !activeAddress || agentRoleQuery.isLoading || Boolean(agentMasterAddress);
   const isViewingOwnSigner = Boolean(
     activeAddress &&
       viewAddress &&
@@ -210,8 +217,9 @@ function App() {
       setLookupAddress(agentMasterAddress);
       setViewAddress(agentMasterAddress);
     } else if (activeTab === "agent" && activeAddress && !agentRoleQuery.isLoading) {
-      setLookupAddress("");
-      setViewAddress(null);
+      setLookupAddress(activeAddress);
+      setViewAddress(activeAddress);
+      setActiveTab("wallet");
     }
   }, [activeAddress, activeTab, agentMasterAddress, agentRoleQuery.isLoading]);
 
@@ -274,6 +282,7 @@ function App() {
 
     setNotice(null);
     setViewAddress(nextAddress as `0x${string}`);
+    localStorage.setItem(READONLY_ADDRESS_STORAGE_KEY, nextAddress);
     setActiveTab("readonly");
   }
 
@@ -586,7 +595,14 @@ function App() {
           <button
             type="button"
             className={activeTab === "readonly" ? "active" : ""}
-            onClick={() => setActiveTab("readonly")}
+            onClick={() => {
+              setActiveTab("readonly");
+              const storedAddress = getStoredReadonlyAddress();
+              if (storedAddress) {
+                setLookupAddress(storedAddress);
+                setViewAddress(storedAddress);
+              }
+            }}
           >
             Read-only address
           </button>
@@ -606,6 +622,7 @@ function App() {
           <button
             type="button"
             className={activeTab === "agent" ? "active" : ""}
+            disabled={!shouldShowAgentTab}
             onClick={() => {
               setActiveTab("agent");
               if (agentMasterAddress) {
@@ -1466,6 +1483,11 @@ function shortAddress(value?: string) {
 
 function shortHash(value: string) {
   return `${value.slice(0, 10)}...${value.slice(-6)}`;
+}
+
+function getStoredReadonlyAddress(): `0x${string}` | null {
+  const value = localStorage.getItem(READONLY_ADDRESS_STORAGE_KEY);
+  return value && isAddress(value) ? (value as `0x${string}`) : null;
 }
 
 function normalizePrivateKey(value: string): `0x${string}` | null {
