@@ -25,15 +25,19 @@ import {
   HYPERLIQUID_BRIDGE2,
   activatePortfolioMarginMode,
   activateUnifiedAccountMode,
+  approveAgentWallet,
   cancelOpenOrder,
   closePerpsPosition,
-  createHyperWalletClient,
   disableUnifiedAccountMode,
   erc20TransferAbi,
   loadAgentRole,
   loadCctpFeeQuote,
   loadAccountSnapshot,
+  sendPerpUsdc,
+  sendSpotAsset,
   sendUnifiedAsset,
+  transferUsdClass,
+  withdrawToArbitrum,
   withdrawToEvmWithData,
   withdrawToHyperEvm,
   type AccountSnapshot,
@@ -382,8 +386,7 @@ function App() {
     }
 
     await runAction("class-transfer", async () => {
-      const client = createHyperWalletClient(activeSigner!);
-      await client.usdClassTransfer({
+      await transferUsdClass(activeSigner!, {
         amount: transferForm.amount,
         toPerp: transferForm.direction === "spot-to-perp",
       });
@@ -403,7 +406,6 @@ function App() {
     }
 
     await runAction("send", async () => {
-      const client = createHyperWalletClient(activeSigner!);
       const source = sendSources.find((item) => item.value === sendForm.source);
 
       if (!source) {
@@ -420,12 +422,12 @@ function App() {
           amount: sendForm.amount,
         });
       } else if (source.value === "perp-usdc") {
-        await client.usdSend({
+        await sendPerpUsdc(activeSigner!, {
           destination: sendForm.destination as `0x${string}`,
           amount: sendForm.amount,
         });
       } else if (source.tokenKey) {
-        await client.spotSend({
+        await sendSpotAsset(activeSigner!, {
           destination: sendForm.destination as `0x${string}`,
           token: source.tokenKey,
           amount: sendForm.amount,
@@ -499,8 +501,7 @@ function App() {
     }
 
     await runAction("approve-agent", async () => {
-      const client = createHyperWalletClient(activeSigner!);
-      await client.approveAgent({
+      await approveAgentWallet(activeSigner!, {
         agentAddress: agentAddress as `0x${string}`,
       });
       setAgentAddressForm("");
@@ -558,11 +559,10 @@ function App() {
     }
 
     await runAction("withdraw", async () => {
-      const client = createHyperWalletClient(activeSigner!);
       const sourceDex = getWithdrawSourceDex(accountType);
 
       if (selectedWithdrawChain.kind === "bridge") {
-        await client.withdraw3({
+        await withdrawToArbitrum(activeSigner!, {
           destination: withdrawForm.destination as `0x${string}`,
           amount: withdrawForm.amount,
         });

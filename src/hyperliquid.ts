@@ -1,13 +1,13 @@
-import * as hl from "@nktkas/hyperliquid";
-import { signUserSignedAction } from "@nktkas/hyperliquid/signing";
-import type { AbstractWallet } from "@nktkas/hyperliquid/signing";
+import {
+  signL1Action,
+  signUserSignedAction,
+} from "@nktkas/hyperliquid/signing";
+import type { AbstractWallet, Hex, ValueMap } from "@nktkas/hyperliquid/signing";
 
 export const ARBITRUM_NATIVE_USDC =
   "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as const;
 export const HYPERLIQUID_BRIDGE2 =
   "0x2Df1c51E09aECF9cacB7bc98cB1742757f163dF7" as const;
-export const HYPEREVM_USDC_SYSTEM_ADDRESS =
-  "0x2000000000000000000000000000000000000000" as const;
 
 export const erc20TransferAbi = [
   {
@@ -22,9 +22,6 @@ export const erc20TransferAbi = [
   },
 ] as const;
 
-const transport = new hl.HttpTransport();
-const publicClient = new hl.PublicClient({ transport });
-
 type AccountAbstractionMode =
   | "disabled"
   | "default"
@@ -33,55 +30,6 @@ type AccountAbstractionMode =
   | "portfolioMargin"
   | "unknown"
   | string;
-
-type ExchangeDefaultResponse =
-  | {
-      status: "ok";
-      response: {
-        type: "default";
-      };
-    }
-  | {
-      status: "err";
-      response: string;
-    };
-
-const userSetAbstractionTypes = {
-  "HyperliquidTransaction:UserSetAbstraction": [
-    { name: "hyperliquidChain", type: "string" },
-    { name: "user", type: "address" },
-    { name: "abstraction", type: "string" },
-    { name: "nonce", type: "uint64" },
-  ],
-};
-
-const sendAssetTypes = {
-  "HyperliquidTransaction:SendAsset": [
-    { name: "hyperliquidChain", type: "string" },
-    { name: "destination", type: "string" },
-    { name: "sourceDex", type: "string" },
-    { name: "destinationDex", type: "string" },
-    { name: "token", type: "string" },
-    { name: "amount", type: "string" },
-    { name: "fromSubAccount", type: "string" },
-    { name: "nonce", type: "uint64" },
-  ],
-};
-
-const sendToEvmWithDataTypes = {
-  "HyperliquidTransaction:SendToEvmWithData": [
-    { name: "hyperliquidChain", type: "string" },
-    { name: "token", type: "string" },
-    { name: "amount", type: "string" },
-    { name: "sourceDex", type: "string" },
-    { name: "destinationRecipient", type: "string" },
-    { name: "addressEncoding", type: "string" },
-    { name: "destinationChainId", type: "uint32" },
-    { name: "gasLimit", type: "uint64" },
-    { name: "data", type: "bytes" },
-    { name: "nonce", type: "uint64" },
-  ],
-};
 
 export type SpotBalanceRow = {
   coin: string;
@@ -155,140 +103,99 @@ export type AgentRoleInfo = {
   masterAddress: `0x${string}` | null;
 };
 
+export type HyperliquidSigner = AbstractWallet;
+
+type PreparedAction =
+  | {
+      signatureKind: "l1";
+      action: ValueMap;
+      nonce: number;
+    }
+  | {
+      signatureKind: "user";
+      action: Record<string, unknown>;
+      nonce: number;
+      chainId: number;
+      types: {
+        [key: string]: {
+          name: string;
+          type: string;
+        }[];
+      };
+    };
+
 export async function loadAgentRole(
   user: `0x${string}`,
 ): Promise<AgentRoleInfo> {
-  const role = await publicClient.userRole({ user });
-
-  return {
-    role: role.role,
-    masterAddress: role.role === "agent" ? role.data.user : null,
-  };
+  return apiGet(`/api/agent-role?address=${user}`);
 }
 
 export async function loadAccountSnapshot(
   user: `0x${string}`,
 ): Promise<AccountSnapshot> {
-  const [
-    spotState,
-    spotMetaAndAssetCtxs,
-    clearinghouseState,
-    accountMode,
-    openOrders,
-    perpsMeta,
-  ] = await Promise.all([
-      publicClient.spotClearinghouseState({ user }),
-      publicClient.spotMetaAndAssetCtxs(),
-      publicClient.clearinghouseState({ user }),
-      loadAccountMode(user),
-      publicClient.openOrders({ user }),
-      publicClient.meta(),
-    ]);
-  const [spotMeta, spotAssetCtxs] = spotMetaAndAssetCtxs;
-
-  const tokenByIndex = new Map(
-    spotMeta.tokens.map((token) => [token.index, token]),
-  );
-  const spotPriceByTokenIndex = buildSpotPriceMap(spotMeta, spotAssetCtxs);
-
-  const spotBalances = spotState.balances.map((balance) => {
-    const token = tokenByIndex.get(balance.token);
-    const tokenKey = token
-      ? (`${token.name}:${token.tokenId}` as `${string}:0x${string}`)
-      : null;
-    const available = Math.max(
-      Number(balance.total) - Number(balance.hold),
-      0,
-    ).toString();
-
-    return {
-      coin: token?.name ?? balance.coin,
-      tokenId: token?.tokenId ?? null,
-      tokenKey,
-      total: balance.total,
-      hold: balance.hold,
-      available,
-      entryNtl: balance.entryNtl,
-    };
-  });
-
-  const spotAccountValue = sumNumbers(
-    spotState.balances.map((balance) => {
-      const tokenPrice = spotPriceByTokenIndex.get(balance.token);
-      if (typeof tokenPrice === "number" && Number.isFinite(tokenPrice)) {
-        return Number(balance.total) * tokenPrice;
-      }
-      return Number(balance.entryNtl);
-    }),
-  );
-  const usdcBalance = spotState.balances.find((balance) => balance.coin === "USDC");
-  const spotUsdcAvailable = usdcBalance
-    ? Math.max(Number(usdcBalance.total) - Number(usdcBalance.hold), 0)
-    : 0;
-  const positions = clearinghouseState.assetPositions.map(({ position }) => ({
-    coin: position.coin,
-    assetId: perpsMeta.universe.findIndex((asset) => asset.name === position.coin),
-    size: position.szi,
-    value: position.positionValue,
-    pnl: position.unrealizedPnl,
-    marginUsed: position.marginUsed,
-  }));
-  const isUnified =
-    accountMode === "unifiedAccount" || accountMode === "portfolioMargin";
-  const perpAccountValue = Number(clearinghouseState.marginSummary.accountValue);
-  const perpsWithdrawable = Number(clearinghouseState.withdrawable);
-  const perpsMarginUsed = Number(clearinghouseState.marginSummary.totalMarginUsed);
-  const positionMarginUsed = sumNumbers(
-    clearinghouseState.assetPositions.map(({ position }) =>
-      Number(position.marginUsed),
-    ),
-  );
-  const unrealizedPnl = sumNumbers(
-    clearinghouseState.assetPositions.map(({ position }) =>
-      Number(position.unrealizedPnl),
-    ),
-  );
-  const marginUsed =
-    perpsMarginUsed > 0 ? perpsMarginUsed : positionMarginUsed;
-  const combinedAccountValue = isUnified
-    ? Math.max(perpAccountValue, spotAccountValue + unrealizedPnl)
-    : perpAccountValue + spotAccountValue;
-  const withdrawable = isUnified
-    ? Math.max(perpsWithdrawable, spotUsdcAvailable)
-    : perpsWithdrawable + spotUsdcAvailable;
-
-  return {
-    accountMode: {
-      mode: accountMode,
-      isUnified,
-    },
-    summary: {
-      accountValue: combinedAccountValue.toString(),
-      perpAccountValue: perpAccountValue.toString(),
-      spotAccountValue: spotAccountValue.toString(),
-      withdrawable: withdrawable.toString(),
-      marginUsed: marginUsed.toString(),
-    },
-    spotBalances,
-    perp: {
-      accountValue: clearinghouseState.marginSummary.accountValue,
-      withdrawable: clearinghouseState.withdrawable,
-      marginUsed: clearinghouseState.marginSummary.totalMarginUsed,
-    },
-    positions,
-    openOrders: openOrders.map((order) =>
-      normalizeOpenOrder(order, spotMeta, perpsMeta),
-    ),
-  };
+  return apiGet(`/api/snapshot?address=${user}`);
 }
 
-export type HyperliquidSigner = AbstractWallet;
+export async function loadCctpFeeQuote(
+  destinationChainId: number,
+): Promise<CctpFeeQuote> {
+  return apiGet(`/api/cctp-fee?destinationChainId=${destinationChainId}`);
+}
 
-export function createHyperWalletClient(wallet: HyperliquidSigner) {
-  return new hl.WalletClient({
-    wallet,
-    transport: new hl.HttpTransport(),
-    signatureChainId: "0xa4b1",
+export async function transferUsdClass(
+  wallet: HyperliquidSigner,
+  args: { amount: string; toPerp: boolean },
+) {
+  return signAndSubmit(wallet, {
+    type: "usdClassTransfer",
+    amount: args.amount,
+    toPerp: args.toPerp,
+  });
+}
+
+export async function sendPerpUsdc(
+  wallet: HyperliquidSigner,
+  args: { destination: `0x${string}`; amount: string },
+) {
+  return signAndSubmit(wallet, {
+    type: "usdSend",
+    destination: args.destination,
+    amount: args.amount,
+  });
+}
+
+export async function sendSpotAsset(
+  wallet: HyperliquidSigner,
+  args: {
+    destination: `0x${string}`;
+    token: `${string}:0x${string}`;
+    amount: string;
+  },
+) {
+  return signAndSubmit(wallet, {
+    type: "spotSend",
+    destination: args.destination,
+    token: args.token,
+    amount: args.amount,
+  });
+}
+
+export async function sendUnifiedAsset(
+  wallet: HyperliquidSigner,
+  args: {
+    destination: `0x${string}`;
+    token: `${string}:0x${string}`;
+    amount: string;
+  },
+) {
+  return signAndSubmit(wallet, {
+    type: "sendAsset",
+    destination: args.destination,
+    sourceDex: "spot",
+    destinationDex: "spot",
+    token: args.token,
+    amount: args.amount,
+    fromSubAccount: "",
   });
 }
 
@@ -296,9 +203,10 @@ export async function cancelOpenOrder(
   wallet: HyperliquidSigner,
   order: { assetId: number; orderId: number },
 ) {
-  const client = createHyperWalletClient(wallet);
-  return client.cancel({
-    cancels: [{ a: order.assetId, o: order.orderId }],
+  return signAndSubmit(wallet, {
+    type: "cancelOrder",
+    assetId: order.assetId,
+    orderId: order.orderId,
   });
 }
 
@@ -306,45 +214,10 @@ export async function closePerpsPosition(
   wallet: HyperliquidSigner,
   position: { coin: string; size: string },
 ) {
-  const size = Number(position.size);
-
-  if (!Number.isFinite(size) || size === 0) {
-    throw new Error("Position size is unavailable.");
-  }
-
-  const [perpsMeta, perpsAssetCtxs] = await publicClient.metaAndAssetCtxs();
-  const assetId = perpsMeta.universe.findIndex(
-    (asset) => asset.name === position.coin,
-  );
-  const asset = perpsMeta.universe[assetId];
-  const assetCtx = perpsAssetCtxs[assetId];
-  const referencePrice = Number(assetCtx?.markPx ?? assetCtx?.oraclePx);
-
-  if (
-    assetId < 0 ||
-    !asset ||
-    !Number.isFinite(referencePrice) ||
-    referencePrice <= 0
-  ) {
-    throw new Error("Unable to identify this position market for closing.");
-  }
-
-  const isBuy = size < 0;
-  const closePrice = referencePrice * (isBuy ? 1.03 : 0.97);
-  const client = createHyperWalletClient(wallet);
-
-  return client.order({
-    orders: [
-      {
-        a: assetId,
-        b: isBuy,
-        p: formatOrderPrice(closePrice, asset.szDecimals),
-        s: Math.abs(size).toString(),
-        r: true,
-        t: { limit: { tif: "Ioc" } },
-      },
-    ],
-    grouping: "na",
+  return signAndSubmit(wallet, {
+    type: "closePosition",
+    coin: position.coin,
+    size: position.size,
   });
 }
 
@@ -369,44 +242,25 @@ export async function disableUnifiedAccountMode(
   return setUserAbstraction(wallet, user, "disabled");
 }
 
-export async function sendUnifiedAsset(
+export async function approveAgentWallet(
   wallet: HyperliquidSigner,
-  args: {
-    destination: `0x${string}`;
-    token: `${string}:0x${string}`;
-    amount: string;
-  },
+  args: { agentAddress: `0x${string}` },
 ) {
-  const nonce = Date.now();
-  const action = {
-    type: "sendAsset",
-    hyperliquidChain: "Mainnet",
-    signatureChainId: "0xa4b1",
+  return signAndSubmit(wallet, {
+    type: "approveAgent",
+    agentAddress: args.agentAddress,
+  });
+}
+
+export async function withdrawToArbitrum(
+  wallet: HyperliquidSigner,
+  args: { destination: `0x${string}`; amount: string },
+) {
+  return signAndSubmit(wallet, {
+    type: "withdraw3",
     destination: args.destination,
-    sourceDex: "spot",
-    destinationDex: "spot",
-    token: args.token,
     amount: args.amount,
-    fromSubAccount: "",
-    nonce,
-  };
-  const signature = await signUserSignedAction({
-    wallet: wallet as Parameters<typeof signUserSignedAction>[0]["wallet"],
-    action,
-    types: sendAssetTypes,
-    chainId: parseInt(action.signatureChainId, 16),
   });
-  const response = await transport.request<ExchangeDefaultResponse>("exchange", {
-    action,
-    signature,
-    nonce,
-  });
-
-  if (response.status === "err") {
-    throw new Error(`Cannot process API request: ${response.response}`);
-  }
-
-  return response;
 }
 
 export async function withdrawToEvmWithData(
@@ -419,38 +273,14 @@ export async function withdrawToEvmWithData(
     signatureChainId: `0x${string}`;
   },
 ) {
-  const nonce = Date.now();
-  const action = {
+  return signAndSubmit(wallet, {
     type: "sendToEvmWithData",
-    hyperliquidChain: "Mainnet",
-    signatureChainId: args.signatureChainId,
-    token: "USDC",
+    destination: args.destination,
     amount: args.amount,
     sourceDex: args.sourceDex,
-    destinationRecipient: args.destination,
-    addressEncoding: "hex",
     destinationChainId: args.destinationChainId,
-    gasLimit: 200000,
-    data: "0x",
-    nonce,
-  };
-  const signature = await signUserSignedAction({
-    wallet: wallet as Parameters<typeof signUserSignedAction>[0]["wallet"],
-    action,
-    types: sendToEvmWithDataTypes,
-    chainId: parseInt(action.signatureChainId, 16),
+    signatureChainId: args.signatureChainId,
   });
-  const response = await transport.request<ExchangeDefaultResponse>("exchange", {
-    action,
-    signature,
-    nonce,
-  });
-
-  if (response.status === "err") {
-    throw new Error(`Cannot process API request: ${response.response}`);
-  }
-
-  return response;
 }
 
 export async function withdrawToHyperEvm(
@@ -460,70 +290,11 @@ export async function withdrawToHyperEvm(
     sourceDex: WithdrawSourceDex;
   },
 ) {
-  const nonce = Date.now();
-  const action = {
-    type: "sendAsset",
-    hyperliquidChain: "Mainnet",
-    signatureChainId: "0xa4b1",
-    destination: HYPEREVM_USDC_SYSTEM_ADDRESS,
-    sourceDex: args.sourceDex,
-    destinationDex: "spot",
-    token: "USDC",
+  return signAndSubmit(wallet, {
+    type: "withdrawHyperEvm",
     amount: args.amount,
-    fromSubAccount: "",
-    nonce,
-  };
-  const signature = await signUserSignedAction({
-    wallet: wallet as Parameters<typeof signUserSignedAction>[0]["wallet"],
-    action,
-    types: sendAssetTypes,
-    chainId: parseInt(action.signatureChainId, 16),
+    sourceDex: args.sourceDex,
   });
-  const response = await transport.request<ExchangeDefaultResponse>("exchange", {
-    action,
-    signature,
-    nonce,
-  });
-
-  if (response.status === "err") {
-    throw new Error(`Cannot process API request: ${response.response}`);
-  }
-
-  return response;
-}
-
-export async function loadCctpFeeQuote(
-  destinationChainId: number,
-): Promise<CctpFeeQuote> {
-  const response = await fetch(
-    `https://iris-api.circle.com/v2/burn/USDC/fees/19/${destinationChainId}?forward=true`,
-  );
-
-  if (!response.ok) {
-    throw new Error("Unable to load CCTP fee.");
-  }
-
-  const fees = (await response.json()) as Array<{
-    finalityThreshold: number;
-    minimumFee: number;
-    forwardFee?: {
-      low?: number;
-      med?: number;
-      high?: number;
-    };
-  }>;
-  const selectedFee = fees[0];
-  const forwardFee =
-    selectedFee?.forwardFee?.med ??
-    selectedFee?.forwardFee?.high ??
-    selectedFee?.forwardFee?.low ??
-    0;
-
-  return {
-    minimumFeeBps: selectedFee?.minimumFee ?? 0,
-    forwardFeeUsdc: (forwardFee / 1_000_000).toString(),
-    finalityThreshold: selectedFee?.finalityThreshold ?? 0,
-  };
 }
 
 async function setUserAbstraction(
@@ -531,140 +302,74 @@ async function setUserAbstraction(
   user: `0x${string}`,
   abstraction: "unifiedAccount" | "portfolioMargin" | "disabled",
 ) {
-  const nonce = Date.now();
-  const action = {
-    type: "userSetAbstraction",
-    hyperliquidChain: "Mainnet",
-    signatureChainId: "0xa4b1",
+  return signAndSubmit(wallet, {
+    type: "setAccountMode",
     user,
     abstraction,
-    nonce,
-  };
-  const signature = await signUserSignedAction({
-    wallet: wallet as Parameters<typeof signUserSignedAction>[0]["wallet"],
-    action,
-    types: userSetAbstractionTypes,
-    chainId: parseInt(action.signatureChainId, 16),
   });
-  const response = await transport.request<ExchangeDefaultResponse>("exchange", {
+}
+
+async function signAndSubmit(
+  wallet: HyperliquidSigner,
+  request: Record<string, unknown>,
+) {
+  const prepared = await prepareAction(request);
+  const signature =
+    prepared.signatureKind === "l1"
+      ? await signL1Action({
+          wallet,
+          action: prepared.action,
+          nonce: prepared.nonce,
+          isTestnet: false,
+        })
+      : await signUserSignedAction({
+          wallet: wallet as Parameters<typeof signUserSignedAction>[0]["wallet"],
+          action: prepared.action,
+          types: prepared.types,
+          chainId: prepared.chainId,
+        });
+
+  return submitAction(prepared.action, signature, prepared.nonce);
+}
+
+async function prepareAction(body: Record<string, unknown>) {
+  return apiPost<PreparedAction>("/api/actions/prepare", body);
+}
+
+async function submitAction(
+  action: PreparedAction["action"],
+  signature: { r: Hex; s: Hex; v: number },
+  nonce: number,
+) {
+  return apiPost("/api/actions/submit", {
     action,
     signature,
     nonce,
   });
-
-  if (response.status === "err") {
-    throw new Error(`Cannot process API request: ${response.response}`);
-  }
-
-  return response;
 }
 
-async function loadAccountMode(user: `0x${string}`) {
-  try {
-    return await transport.request<AccountAbstractionMode>("info", {
-      type: "userAbstraction",
-      user,
-    });
-  } catch {
-    return "unknown";
-  }
+async function apiGet<T>(path: string): Promise<T> {
+  const response = await fetch(path);
+  return parseApiResponse<T>(response);
 }
 
-function buildSpotPriceMap(
-  spotMeta: Awaited<ReturnType<typeof publicClient.spotMeta>>,
-  spotAssetCtxs: Awaited<ReturnType<typeof publicClient.spotMetaAndAssetCtxs>>[1],
-) {
-  const priceByTokenIndex = new Map<number, number>([[0, 1]]);
-
-  spotMeta.universe.forEach((universe) => {
-    const baseToken = universe.tokens[0];
-    const quoteToken = universe.tokens[1];
-    const ctx = spotAssetCtxs[universe.index];
-    const price = Number(ctx?.markPx ?? ctx?.midPx);
-    if (quoteToken === 0 && Number.isFinite(price) && price > 0) {
-      priceByTokenIndex.set(baseToken, price);
-    }
+async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
-
-  return priceByTokenIndex;
+  return parseApiResponse<T>(response);
 }
 
-function normalizeOpenOrder(
-  order: Awaited<ReturnType<typeof publicClient.openOrders>>[number],
-  spotMeta: Awaited<ReturnType<typeof publicClient.spotMeta>>,
-  perpsMeta: Awaited<ReturnType<typeof publicClient.meta>>,
-): OpenOrderRow {
-  const market = describeOrderMarket(order.coin, spotMeta, perpsMeta);
-  const limitPrice = Number(order.limitPx);
-  const size = Number(order.sz);
+async function parseApiResponse<T>(response: Response): Promise<T> {
+  const body = await response.json();
 
-  return {
-    ...market,
-    orderId: order.oid,
-    clientOrderId: order.cloid ?? null,
-    side: order.side === "B" ? "buy" : "sell",
-    limitPrice: order.limitPx,
-    size: order.sz,
-    originalSize: order.origSz,
-    notionalUsd:
-      Number.isFinite(limitPrice) && Number.isFinite(size)
-        ? (limitPrice * size).toString()
-        : "0",
-    reduceOnly: order.reduceOnly === true,
-    timestamp: order.timestamp,
-    placedAt: new Date(order.timestamp).toISOString(),
-  };
-}
-
-function describeOrderMarket(
-  coin: string,
-  spotMeta: Awaited<ReturnType<typeof publicClient.spotMeta>>,
-  perpsMeta: Awaited<ReturnType<typeof publicClient.meta>>,
-) {
-  if (coin.startsWith("@")) {
-    const spotPairIndex = Number(coin.slice(1));
-    const universe = spotMeta.universe.find(
-      (spotUniverse) => spotUniverse.index === spotPairIndex,
-    );
-    const baseToken = universe
-      ? spotMeta.tokens.find((token) => token.index === universe.tokens[0])
-      : null;
-    const quoteToken = universe
-      ? spotMeta.tokens.find((token) => token.index === universe.tokens[1])
-      : null;
-
-    return {
-      assetId: 10000 + spotPairIndex,
-      marketType: "spot" as const,
-      symbol: universe?.name ?? coin,
-      base: baseToken?.name ?? null,
-      quote: quoteToken?.name ?? null,
-    };
+  if (!response.ok) {
+    const message =
+      typeof body?.message === "string" ? body.message : "API request failed.";
+    throw new Error(message);
   }
 
-  return {
-    assetId: perpsMeta.universe.findIndex((asset) => asset.name === coin),
-    marketType: "perp" as const,
-    symbol: coin,
-    base: coin,
-    quote: "USDC",
-  };
-}
-
-function formatOrderPrice(value: number, szDecimals: number) {
-  const maxDecimals = Math.max(0, 6 - szDecimals);
-  const rounded =
-    value >= 100_000 ? Math.round(value) : Number(value.toPrecision(5));
-
-  return rounded
-    .toFixed(maxDecimals)
-    .replace(/(\.\d*?[1-9])0+$/, "$1")
-    .replace(/\.0+$/, "");
-}
-
-function sumNumbers(values: number[]) {
-  return values.reduce(
-    (total, value) => total + (Number.isFinite(value) ? value : 0),
-    0,
-  );
+  return body as T;
 }
