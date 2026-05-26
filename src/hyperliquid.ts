@@ -68,6 +68,13 @@ export type OpenOrderRow = {
   placedAt: string;
 };
 
+export type AgentWalletRow = {
+  address: `0x${string}`;
+  name: string;
+  validUntil: number;
+  validUntilIso: string | null;
+};
+
 export type AccountSnapshot = {
   accountMode: {
     mode: AccountAbstractionMode;
@@ -88,6 +95,7 @@ export type AccountSnapshot = {
   };
   positions: PositionRow[];
   openOrders: OpenOrderRow[];
+  agents: AgentWalletRow[];
 };
 
 export type WithdrawSourceDex = "" | "spot";

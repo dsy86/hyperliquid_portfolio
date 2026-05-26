@@ -114,6 +114,14 @@ GET /api/snapshot?address=0x...
       "timestamp": 1779788868199,
       "placedAt": "2026-05-26T09:47:48.199Z"
     }
+  ],
+  "agents": [
+    {
+      "address": "0xAgentWalletAddress",
+      "name": "",
+      "validUntil": 1782380868199,
+      "validUntilIso": "2026-06-25T09:47:48.199Z"
+    }
   ]
 }
 ```
@@ -133,6 +141,7 @@ GET /api/snapshot?address=0x...
 | `perp` | object | Hyperliquid clearinghouse state 返回的 Perps 账户汇总。 |
 | `positions[]` | array | 当前 Perps 持仓。它们是已成交形成的仓位，不是挂单。 |
 | `openOrders[]` | array | 当前开放的 Spot 和 Perps 挂单；已成交或已取消订单不包含在内。 |
+| `agents[]` | array | 当前查询钱包已授权的 Agent Wallet 列表。 |
 
 #### `spotBalances[]`
 
@@ -176,6 +185,15 @@ GET /api/snapshot?address=0x...
 | `reduceOnly` | boolean | 是否只减仓。 |
 | `timestamp` | number | 下单时间，Unix 毫秒时间戳。 |
 | `placedAt` | string | ISO 8601 UTC 时间。 |
+
+#### `agents[]`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `address` | string | 已授权的 Agent Wallet 地址。 |
+| `name` | string | Agent 名称。空字符串表示 unnamed。 |
+| `validUntil` | number | 授权过期时间，Unix 毫秒时间戳。 |
+| `validUntilIso` | string or null | 授权过期时间的 ISO 8601 UTC 字符串；无法解析时为 `null`。 |
 
 ### 错误
 
@@ -403,4 +421,3 @@ Content-Type: application/json
 | `400` | `INVALID_PAYLOAD` | 缺少 `action`、`signature` 或 `nonce`。 |
 | `502` | `HYPERLIQUID_ACTION_FAILED` | Hyperliquid 返回错误；可用时会附带 `result`。 |
 | `502` | `ACTION_SUBMIT_FAILED` | 网络或上游解析失败。 |
-

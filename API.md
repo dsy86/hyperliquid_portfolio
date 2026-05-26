@@ -114,6 +114,14 @@ GET /api/snapshot?address=0x...
       "timestamp": 1779788868199,
       "placedAt": "2026-05-26T09:47:48.199Z"
     }
+  ],
+  "agents": [
+    {
+      "address": "0xAgentWalletAddress",
+      "name": "",
+      "validUntil": 1782380868199,
+      "validUntilIso": "2026-06-25T09:47:48.199Z"
+    }
   ]
 }
 ```
@@ -133,6 +141,7 @@ GET /api/snapshot?address=0x...
 | `perp` | object | Perps account summary as returned by Hyperliquid clearinghouse state. |
 | `positions[]` | array | Current perps positions. These are filled positions, not open orders. |
 | `openOrders[]` | array | Currently open spot and perps orders. Filled and canceled orders are not included. |
+| `agents[]` | array | Agent Wallets currently approved by the queried wallet. |
 
 #### `spotBalances[]`
 
@@ -176,6 +185,15 @@ GET /api/snapshot?address=0x...
 | `reduceOnly` | boolean | Whether the order can only reduce an existing perps position. |
 | `timestamp` | number | Placement timestamp in milliseconds. |
 | `placedAt` | string | ISO 8601 UTC timestamp. |
+
+#### `agents[]`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `address` | string | Approved Agent Wallet address. |
+| `name` | string | Agent name. Empty string means unnamed. |
+| `validUntil` | number | Expiration timestamp in milliseconds. |
+| `validUntilIso` | string or null | ISO 8601 UTC expiration timestamp when available. |
 
 ### Errors
 
@@ -403,4 +421,3 @@ The response is the upstream Hyperliquid exchange response.
 | `400` | `INVALID_PAYLOAD` | Missing `action`, `signature`, or `nonce`. |
 | `502` | `HYPERLIQUID_ACTION_FAILED` | Hyperliquid returned an error. The response includes `result` when available. |
 | `502` | `ACTION_SUBMIT_FAILED` | Network or upstream parsing failure. |
-

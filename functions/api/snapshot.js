@@ -29,6 +29,7 @@ async function loadSnapshot(user) {
     accountMode,
     openOrders,
     perpsMeta,
+    agents,
   ] = await Promise.all([
     postInfo({ type: "spotClearinghouseState", user }),
     postInfo({ type: "spotMetaAndAssetCtxs" }),
@@ -36,6 +37,7 @@ async function loadSnapshot(user) {
     loadAccountMode(user),
     postInfo({ type: "openOrders", user }),
     postInfo({ type: "meta" }),
+    loadExtraAgents(user),
   ]);
   const [spotMeta, spotAssetCtxs] = spotMetaAndAssetCtxs;
   const tokenByIndex = new Map(spotMeta.tokens.map((token) => [token.index, token]));
@@ -114,7 +116,27 @@ async function loadSnapshot(user) {
     openOrders: openOrders.map((order) =>
       normalizeOpenOrder(order, spotMeta, perpsMeta),
     ),
+    agents,
   };
+}
+
+async function loadExtraAgents(user) {
+  try {
+    const agents = await postInfo({ type: "extraAgents", user });
+    return Array.isArray(agents)
+      ? agents.map((agent) => ({
+          address: agent.address,
+          name: agent.name ?? "",
+          validUntil: agent.validUntil,
+          validUntilIso:
+            typeof agent.validUntil === "number"
+              ? new Date(agent.validUntil).toISOString()
+              : null,
+        }))
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function normalizeOpenOrder(order, spotMeta, perpsMeta) {

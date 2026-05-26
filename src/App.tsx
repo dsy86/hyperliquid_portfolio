@@ -41,6 +41,7 @@ import {
   withdrawToEvmWithData,
   withdrawToHyperEvm,
   type AccountSnapshot,
+  type AgentWalletRow,
   type CctpFeeQuote,
   type HyperliquidSigner,
   type OpenOrderRow,
@@ -880,6 +881,7 @@ function App() {
               ) : (
                 <span className="readonly-pill">Read-only</span>
               )}
+              <AgentWalletList agents={accountQuery.data?.agents ?? []} />
             </section>
 
             {activeTab === "wallet" && activeAddress ? (
@@ -1296,6 +1298,32 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function AgentWalletList({ agents }: { agents: AgentWalletRow[] }) {
+  return (
+    <div className="agent-wallet-list">
+      <div className="agent-wallet-list-heading">
+        <span>Agent wallets</span>
+        <strong>{agents.length}</strong>
+      </div>
+      {agents.length ? (
+        <ul>
+          {agents.map((agent) => (
+            <li key={agent.address}>
+              <div>
+                <strong>{shortAddress(agent.address)}</strong>
+                <span>{agent.name.trim() ? agent.name : "Unnamed"}</span>
+              </div>
+              <span>{formatAgentValidUntil(agent.validUntil)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="hint">No approved Agent Wallets found.</p>
+      )}
+    </div>
+  );
+}
+
 function BalancesTable({
   data,
   isLoading,
@@ -1682,6 +1710,13 @@ function formatDateTime(value: number) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatAgentValidUntil(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "No expiry";
+  }
+  return `Valid until ${formatDateTime(value)}`;
 }
 
 function shortAddress(value?: string) {

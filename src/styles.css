@@ -294,6 +294,63 @@ h2 {
   font-size: 22px;
 }
 
+.agent-wallet-list {
+  display: grid;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.agent-wallet-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #66758e;
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.agent-wallet-list-heading strong {
+  color: #111827;
+  font-size: 13px;
+}
+
+.agent-wallet-list ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-wallet-list li {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #d8e3ee;
+  border-radius: 8px;
+  background: #f8fbfe;
+}
+
+.agent-wallet-list li div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-wallet-list li strong {
+  overflow: hidden;
+  color: #172033;
+  font-size: 14px;
+  text-overflow: ellipsis;
+}
+
+.agent-wallet-list li span {
+  color: #64748b;
+  font-size: 12px;
+}
+
 .refresh {
   white-space: nowrap;
 }
