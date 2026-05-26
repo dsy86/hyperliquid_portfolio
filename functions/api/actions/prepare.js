@@ -1,6 +1,8 @@
 const HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info";
 const HYPERLIQUID_CHAIN = "Mainnet";
 const SIGNATURE_CHAIN_ID = "0xa4b1";
+const AGENT_NAME_PREFIX = "hyperliquid-portfolio";
+const AGENT_VALID_FOR_MS = (180 * 24 * 60 - 10) * 60 * 1000;
 const HYPEREVM_USDC_SYSTEM_ADDRESS =
   "0x2000000000000000000000000000000000000000";
 
@@ -220,7 +222,7 @@ async function prepareAction(body) {
           hyperliquidChain: HYPERLIQUID_CHAIN,
           signatureChainId: SIGNATURE_CHAIN_ID,
           agentAddress: body.agentAddress,
-          agentName: body.agentName ?? "",
+          agentName: buildAgentName(nonce),
           nonce,
         },
         nonce,
@@ -373,6 +375,10 @@ function requireNumber(value, name) {
 
 function isAddress(value) {
   return typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value);
+}
+
+function buildAgentName(nonce) {
+  return `${AGENT_NAME_PREFIX} valid_until ${nonce + AGENT_VALID_FOR_MS}`;
 }
 
 function formatOrderPrice(value, szDecimals) {

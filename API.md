@@ -298,7 +298,7 @@ Content-Type: application/json
 | `spotSend` | `destination`, `token`, `amount` | Send a spot asset to another HyperCore address. |
 | `sendAsset` | `destination`, `token`, `amount` | Send a unified-account asset. Optional: `sourceDex`, `destinationDex`, `fromSubAccount`. |
 | `setAccountMode` | `user`, `abstraction` | Change account mode. `abstraction` is `disabled`, `unifiedAccount`, or `portfolioMargin`. |
-| `approveAgent` | `agentAddress` | Approve an unnamed agent wallet. Optional: `agentName`. |
+| `approveAgent` | `agentAddress` | Approve a named agent wallet. The API sets `agentName` to `hyperliquid-portfolio valid_until <timestamp>` for roughly 180 days minus 10 minutes. |
 | `withdraw3` | `destination`, `amount` | Withdraw USDC to Arbitrum through the legacy Hyperliquid bridge. |
 | `sendToEvmWithData` | `destination`, `amount`, `destinationChainId` | Withdraw USDC through CCTP. Optional: `sourceDex`, `signatureChainId`. |
 | `withdrawHyperEvm` | `amount` | Withdraw USDC to HyperEVM system address. Optional: `sourceDex`. |

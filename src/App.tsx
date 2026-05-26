@@ -506,7 +506,7 @@ function App() {
         agentAddress: agentAddress as `0x${string}`,
       });
       setAgentAddressForm("");
-      return "Unnamed Agent Wallet approved.";
+      return "Agent Wallet approved for about 180 days.";
     });
   }
 
@@ -890,8 +890,7 @@ function App() {
                   <p className="eyebrow">Agent wallet</p>
                   <h2>Approve Agent</h2>
                   <p className="hint">
-                    Approves an unnamed Hyperliquid Agent Wallet for your
-                    connected wallet.
+                    Approves a named Hyperliquid Agent Wallet for about 180 days.
                   </p>
                 </div>
                 <div className="agent-approval-form">

@@ -298,7 +298,7 @@ Content-Type: application/json
 | `spotSend` | `destination`, `token`, `amount` | 发送 Spot 资产到另一个 HyperCore 地址。 |
 | `sendAsset` | `destination`, `token`, `amount` | 发送 Unified Account 资产。可选：`sourceDex`、`destinationDex`、`fromSubAccount`。 |
 | `setAccountMode` | `user`, `abstraction` | 修改账户模式。`abstraction` 为 `disabled`、`unifiedAccount` 或 `portfolioMargin`。 |
-| `approveAgent` | `agentAddress` | 授权 unnamed Agent Wallet。可选：`agentName`。 |
+| `approveAgent` | `agentAddress` | 授权 named Agent Wallet。API 会自动设置 `agentName` 为 `hyperliquid-portfolio valid_until <timestamp>`，有效期约为 180 天减 10 分钟。 |
 | `withdraw3` | `destination`, `amount` | 通过旧 Hyperliquid bridge 提现 USDC 到 Arbitrum。 |
 | `sendToEvmWithData` | `destination`, `amount`, `destinationChainId` | 通过 CCTP 提现 USDC。可选：`sourceDex`、`signatureChainId`。 |
 | `withdrawHyperEvm` | `amount` | 提现 USDC 到 HyperEVM 系统地址。可选：`sourceDex`。 |
