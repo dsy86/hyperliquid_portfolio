@@ -26,6 +26,7 @@ import {
   activatePortfolioMarginMode,
   activateUnifiedAccountMode,
   cancelOpenOrder,
+  closePerpsPosition,
   createHyperWalletClient,
   disableUnifiedAccountMode,
   erc20TransferAbi,
@@ -39,6 +40,7 @@ import {
   type CctpFeeQuote,
   type HyperliquidSigner,
   type OpenOrderRow,
+  type PositionRow,
   type WithdrawSourceDex,
 } from "./hyperliquid";
 import { hasWalletConnect, primaryChain } from "./wagmi";
@@ -524,6 +526,24 @@ function App() {
     });
   }
 
+  async function submitClosePosition(position: PositionRow) {
+    if (position.assetId < 0) {
+      setNotice({
+        kind: "error",
+        text: "Unable to identify this position market for closing.",
+      });
+      return;
+    }
+
+    await runAction(`close-${position.coin}`, async () => {
+      await closePerpsPosition(activeSigner!, {
+        coin: position.coin,
+        size: position.size,
+      });
+      return "Close position order submitted.";
+    });
+  }
+
   async function submitWithdraw() {
     if (
       selectedWithdrawChain.kind !== "hyperevm" &&
@@ -904,7 +924,12 @@ function App() {
               <div className="perps-sections">
                 <section className="perps-section">
                   <h3>Open positions</h3>
-                  <PositionsTable data={accountQuery.data} />
+                  <PositionsTable
+                    data={accountQuery.data}
+                    canClose={canOperateCurrentView}
+                    busyAction={busyAction}
+                    onClose={submitClosePosition}
+                  />
                 </section>
                 <section className="perps-section">
                   <h3>Open orders</h3>
@@ -1349,7 +1374,17 @@ function BalancesTable({
   );
 }
 
-function PositionsTable({ data }: { data?: AccountSnapshot }) {
+function PositionsTable({
+  data,
+  canClose,
+  busyAction,
+  onClose,
+}: {
+  data?: AccountSnapshot;
+  canClose: boolean;
+  busyAction: string | null;
+  onClose: (position: PositionRow) => void;
+}) {
   if (!data?.positions.length) {
     return <div className="empty-state">No open perps positions.</div>;
   }
@@ -1363,21 +1398,42 @@ function PositionsTable({ data }: { data?: AccountSnapshot }) {
             <th>Size</th>
             <th>Value</th>
             <th>PNL</th>
+            {canClose ? <th>Action</th> : null}
           </tr>
         </thead>
         <tbody>
-          {data.positions.map((position) => (
-            <tr key={position.coin}>
-              <td>
-                <strong>{position.coin}</strong>
-              </td>
-              <td>{formatNumber(position.size)}</td>
-              <td>{formatUsd(position.value)}</td>
-              <td className={Number(position.pnl) >= 0 ? "green" : "red"}>
-                {formatUsd(position.pnl)}
-              </td>
-            </tr>
-          ))}
+          {data.positions.map((position) => {
+            const closeBusy = busyAction === `close-${position.coin}`;
+
+            return (
+              <tr key={position.coin}>
+                <td>
+                  <strong>{position.coin}</strong>
+                  <span className="table-subtext">
+                    {Number(position.size) > 0 ? "Long" : "Short"}
+                  </span>
+                </td>
+                <td>{formatNumber(position.size)}</td>
+                <td>{formatUsd(position.value)}</td>
+                <td className={Number(position.pnl) >= 0 ? "green" : "red"}>
+                  {formatUsd(position.pnl)}
+                </td>
+                {canClose ? (
+                  <td>
+                    <button
+                      type="button"
+                      className="table-action-button"
+                      disabled={closeBusy || position.assetId < 0}
+                      onClick={() => onClose(position)}
+                    >
+                      <XCircle size={15} />
+                      {closeBusy ? "Closing" : "Close"}
+                    </button>
+                  </td>
+                ) : null}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

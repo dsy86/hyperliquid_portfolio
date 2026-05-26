@@ -95,6 +95,7 @@ export type SpotBalanceRow = {
 
 export type PositionRow = {
   coin: string;
+  assetId: number;
   size: string;
   value: string;
   pnl: string;
@@ -226,6 +227,7 @@ export async function loadAccountSnapshot(
     : 0;
   const positions = clearinghouseState.assetPositions.map(({ position }) => ({
     coin: position.coin,
+    assetId: perpsMeta.universe.findIndex((asset) => asset.name === position.coin),
     size: position.szi,
     value: position.positionValue,
     pnl: position.unrealizedPnl,
@@ -297,6 +299,52 @@ export async function cancelOpenOrder(
   const client = createHyperWalletClient(wallet);
   return client.cancel({
     cancels: [{ a: order.assetId, o: order.orderId }],
+  });
+}
+
+export async function closePerpsPosition(
+  wallet: HyperliquidSigner,
+  position: { coin: string; size: string },
+) {
+  const size = Number(position.size);
+
+  if (!Number.isFinite(size) || size === 0) {
+    throw new Error("Position size is unavailable.");
+  }
+
+  const [perpsMeta, perpsAssetCtxs] = await publicClient.metaAndAssetCtxs();
+  const assetId = perpsMeta.universe.findIndex(
+    (asset) => asset.name === position.coin,
+  );
+  const asset = perpsMeta.universe[assetId];
+  const assetCtx = perpsAssetCtxs[assetId];
+  const referencePrice = Number(assetCtx?.markPx ?? assetCtx?.oraclePx);
+
+  if (
+    assetId < 0 ||
+    !asset ||
+    !Number.isFinite(referencePrice) ||
+    referencePrice <= 0
+  ) {
+    throw new Error("Unable to identify this position market for closing.");
+  }
+
+  const isBuy = size < 0;
+  const closePrice = referencePrice * (isBuy ? 1.03 : 0.97);
+  const client = createHyperWalletClient(wallet);
+
+  return client.order({
+    orders: [
+      {
+        a: assetId,
+        b: isBuy,
+        p: formatOrderPrice(closePrice, asset.szDecimals),
+        s: Math.abs(size).toString(),
+        r: true,
+        t: { limit: { tif: "Ioc" } },
+      },
+    ],
+    grouping: "na",
   });
 }
 
@@ -601,6 +649,17 @@ function describeOrderMarket(
     base: coin,
     quote: "USDC",
   };
+}
+
+function formatOrderPrice(value: number, szDecimals: number) {
+  const maxDecimals = Math.max(0, 6 - szDecimals);
+  const rounded =
+    value >= 100_000 ? Math.round(value) : Number(value.toPrecision(5));
+
+  return rounded
+    .toFixed(maxDecimals)
+    .replace(/(\.\d*?[1-9])0+$/, "$1")
+    .replace(/\.0+$/, "");
 }
 
 function sumNumbers(values: number[]) {
