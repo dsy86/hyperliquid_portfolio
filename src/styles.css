@@ -79,8 +79,7 @@ h2 {
 
 .wallet-pill,
 .portfolio-tabs-band,
-.summary-band,
-.mode-band,
+.account-card,
 .panel,
 .connect-shell {
   border: 1px solid #dfe6ef;
@@ -241,21 +240,40 @@ h2 {
   justify-content: flex-end;
 }
 
-.summary-band {
+.account-tools-grid {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 14px;
-  align-items: center;
-  padding: 16px;
   margin-bottom: 18px;
+}
+
+.account-card {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 16px;
   border-radius: 8px;
 }
 
-.summary-band.three-metrics {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+.account-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
 }
 
-.summary-band.four-metrics {
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+.metrics-grid {
+  display: grid;
+  gap: 12px;
+  align-items: center;
+}
+
+.metrics-grid.three-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metrics-grid.four-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .metric {
@@ -278,16 +296,6 @@ h2 {
 
 .refresh {
   white-space: nowrap;
-}
-
-.mode-band {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 16px;
-  margin-bottom: 18px;
-  border-radius: 8px;
 }
 
 .switch-button {
@@ -344,7 +352,6 @@ h2 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  min-width: min(100%, 460px);
 }
 
 .account-type-control button {
@@ -410,6 +417,10 @@ h2 {
 }
 
 .balances-panel {
+  grid-column: span 2;
+}
+
+.perps-panel {
   grid-column: span 2;
 }
 
@@ -670,15 +681,11 @@ select:focus {
   .private-key-form,
   .wallet-tab-row,
   .agent-approval-form,
-  .summary-band,
-  .mode-band,
+  .account-tools-grid,
+  .metrics-grid.three-metrics,
+  .metrics-grid.four-metrics,
   .content-grid {
     grid-template-columns: 1fr;
-  }
-
-  .mode-band {
-    align-items: stretch;
-    flex-direction: column;
   }
 
   .lookup-actions {
@@ -696,6 +703,10 @@ select:focus {
   }
 
   .balances-panel {
+    grid-column: auto;
+  }
+
+  .perps-panel {
     grid-column: auto;
   }
 

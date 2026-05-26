@@ -709,49 +709,23 @@ function App() {
         {activeTab === "wallet" ? (
           <div className="wallet-tab-panel">
             {activeAddress ? (
-              <>
-                <div className="wallet-tab-row">
-                  <div>
-                    <p className="eyebrow">
-                      {signerKind === "private-key"
-                        ? "Imported wallet"
-                        : "Connected wallet"}
-                    </p>
-                    <strong>{shortAddress(activeAddress)}</strong>
-                  </div>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={useConnectedWalletAddress}
-                  >
-                    Refresh wallet view
-                  </button>
+              <div className="wallet-tab-row">
+                <div>
+                  <p className="eyebrow">
+                    {signerKind === "private-key"
+                      ? "Imported wallet"
+                      : "Connected wallet"}
+                  </p>
+                  <strong>{shortAddress(activeAddress)}</strong>
                 </div>
-                <div className="agent-approval-form">
-                  <label>
-                    Agent wallet address
-                    <input
-                      value={agentAddressForm}
-                      placeholder="0x..."
-                      onChange={(event) =>
-                        setAgentAddressForm(event.target.value)
-                      }
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className="primary-button"
-                    disabled={busyAction === "approve-agent"}
-                    onClick={submitApproveAgent}
-                  >
-                    Approve Agent
-                  </button>
-                </div>
-                <p className="hint">
-                  This approves the address as the unnamed Hyperliquid Agent
-                  Wallet for your connected wallet.
-                </p>
-              </>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={useConnectedWalletAddress}
+                >
+                  Refresh wallet view
+                </button>
+              </div>
             ) : (
               <SignerAccess
                 privateKeyInput={privateKeyInput}
@@ -825,78 +799,121 @@ function App() {
         ) : null
       ) : (
         <>
-          <section
-            className={`summary-band ${
-              isManualMode ? "four-metrics" : "three-metrics"
-            }`}
-          >
-            <Metric
-              label={isManualMode ? "Perps account" : "Account value"}
-              value={formatUsd(
-                isManualMode
-                  ? accountQuery.data?.summary.perpAccountValue
-                  : accountQuery.data?.summary.accountValue,
-              )}
-            />
-            {isManualMode ? (
-              <Metric
-                label="Spot account"
-                value={formatUsd(accountQuery.data?.summary.spotAccountValue)}
-              />
-            ) : null}
-            <Metric
-              label="Withdrawable"
-              value={formatUsd(accountQuery.data?.summary.withdrawable)}
-            />
-            <Metric
-              label="Margin used"
-              value={formatUsd(accountQuery.data?.summary.marginUsed)}
-            />
-            <button
-              type="button"
-              className="secondary-button refresh"
-              onClick={() => accountQuery.refetch()}
-              disabled={accountQuery.isFetching}
-            >
-              <RefreshCw size={16} />
-              Refresh
-            </button>
-          </section>
+          <section className="account-tools-grid">
+            <section className="account-card account-overview-card">
+              <div className="account-card-heading">
+                <div>
+                  <p className="eyebrow">Portfolio</p>
+                  <h2>Account overview</h2>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button refresh"
+                  onClick={() => accountQuery.refetch()}
+                  disabled={accountQuery.isFetching}
+                >
+                  <RefreshCw size={16} />
+                  Refresh
+                </button>
+              </div>
+              <div
+                className={`metrics-grid ${
+                  isManualMode ? "four-metrics" : "three-metrics"
+                }`}
+              >
+                <Metric
+                  label={isManualMode ? "Perps account" : "Account value"}
+                  value={formatUsd(
+                    isManualMode
+                      ? accountQuery.data?.summary.perpAccountValue
+                      : accountQuery.data?.summary.accountValue,
+                  )}
+                />
+                {isManualMode ? (
+                  <Metric
+                    label="Spot account"
+                    value={formatUsd(accountQuery.data?.summary.spotAccountValue)}
+                  />
+                ) : null}
+                <Metric
+                  label="Withdrawable"
+                  value={formatUsd(accountQuery.data?.summary.withdrawable)}
+                />
+                <Metric
+                  label="Margin used"
+                  value={formatUsd(accountQuery.data?.summary.marginUsed)}
+                />
+              </div>
+            </section>
 
-          <section className="mode-band">
-            <div>
-              <p className="eyebrow">Account mode</p>
-              <h2>{getAccountTypeLabel(accountType)}</h2>
-              <p className="hint">
-                Viewing {shortAddress(viewAddress)}
-                {canOperateCurrentView
-                  ? activeTab === "agent"
-                    ? ` with Agent signing from ${shortAddress(activeAddress ?? undefined)}.`
-                    : " with signing enabled."
-                  : " in read-only mode."}
-              </p>
-            </div>
-            {canOperateCurrentView ? (
-              <div className="account-type-control">
-                {(["unified", "portfolio", "manual"] as const).map((type) => (
+            <section className="account-card account-mode-card">
+              <div>
+                <p className="eyebrow">Account mode</p>
+                <h2>{getAccountTypeLabel(accountType)}</h2>
+                <p className="hint">
+                  Viewing {shortAddress(viewAddress)}
+                  {canOperateCurrentView
+                    ? activeTab === "agent"
+                      ? ` with Agent signing from ${shortAddress(activeAddress ?? undefined)}.`
+                      : " with signing enabled."
+                    : " in read-only mode."}
+                </p>
+              </div>
+              {canOperateCurrentView ? (
+                <div className="account-type-control">
+                  {(["unified", "portfolio", "manual"] as const).map((type) => (
+                    <button
+                      type="button"
+                      key={type}
+                      className={accountType === type ? "active" : ""}
+                      disabled={
+                        busyAction === "account-mode" ||
+                        accountQuery.isLoading ||
+                        accountType === type
+                      }
+                      onClick={() => submitSetAccountType(type)}
+                    >
+                      {getAccountTypeLabel(type)}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <span className="readonly-pill">Read-only</span>
+              )}
+            </section>
+
+            {activeTab === "wallet" && activeAddress ? (
+              <section className="account-card agent-approval-card">
+                <div>
+                  <p className="eyebrow">Agent wallet</p>
+                  <h2>Approve Agent</h2>
+                  <p className="hint">
+                    Approves an unnamed Hyperliquid Agent Wallet for your
+                    connected wallet.
+                  </p>
+                </div>
+                <div className="agent-approval-form">
+                  <label>
+                    Agent wallet address
+                    <input
+                      value={agentAddressForm}
+                      placeholder="0x..."
+                      onChange={(event) =>
+                        setAgentAddressForm(event.target.value)
+                      }
+                    />
+                  </label>
                   <button
                     type="button"
-                    key={type}
-                    className={accountType === type ? "active" : ""}
-                    disabled={
-                      busyAction === "account-mode" ||
-                      accountQuery.isLoading ||
-                      accountType === type
-                    }
-                    onClick={() => submitSetAccountType(type)}
+                    className="primary-button"
+                    disabled={busyAction === "approve-agent"}
+                    onClick={submitApproveAgent}
                   >
-                    {getAccountTypeLabel(type)}
+                    Approve Agent
                   </button>
-                ))}
-              </div>
-            ) : (
-              <span className="readonly-pill">Read-only</span>
-            )}
+                </div>
+              </section>
+            ) : null}
           </section>
 
           <section className="content-grid">
@@ -914,7 +931,7 @@ function App() {
               />
             </section>
 
-            <section className="panel">
+            <section className="panel perps-panel">
               <div className="panel-heading">
                 <div>
                   <p className="eyebrow">Perps</p>
