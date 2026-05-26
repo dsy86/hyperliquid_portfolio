@@ -509,6 +509,50 @@ td strong {
   letter-spacing: 0;
 }
 
+.perps-sections {
+  display: grid;
+  gap: 18px;
+}
+
+.perps-section {
+  display: grid;
+  gap: 10px;
+}
+
+.perps-section h3 {
+  margin: 0;
+  color: #2c3a4f;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.table-subtext {
+  display: block;
+  margin-top: 3px;
+  color: #7a879a;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.table-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #f0c4c0;
+  border-radius: 8px;
+  color: #9f2f26;
+  background: #fff7f6;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.table-action-button:hover {
+  background: #ffefed;
+}
+
 .action-panel {
   display: flex;
   min-height: 270px;

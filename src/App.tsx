@@ -7,6 +7,7 @@ import {
   RefreshCw,
   Send,
   Wallet,
+  XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ import {
   HYPERLIQUID_BRIDGE2,
   activatePortfolioMarginMode,
   activateUnifiedAccountMode,
+  cancelOpenOrder,
   createHyperWalletClient,
   disableUnifiedAccountMode,
   erc20TransferAbi,
@@ -36,6 +38,7 @@ import {
   type AccountSnapshot,
   type CctpFeeQuote,
   type HyperliquidSigner,
+  type OpenOrderRow,
   type WithdrawSourceDex,
 } from "./hyperliquid";
 import { hasWalletConnect, primaryChain } from "./wagmi";
@@ -503,6 +506,24 @@ function App() {
     });
   }
 
+  async function submitCancelOrder(order: OpenOrderRow) {
+    if (order.assetId < 0) {
+      setNotice({
+        kind: "error",
+        text: "Unable to identify this order market for cancellation.",
+      });
+      return;
+    }
+
+    await runAction(`cancel-${order.orderId}`, async () => {
+      await cancelOpenOrder(activeSigner!, {
+        assetId: order.assetId,
+        orderId: order.orderId,
+      });
+      return "Order cancellation submitted.";
+    });
+  }
+
   async function submitWithdraw() {
     if (
       selectedWithdrawChain.kind !== "hyperevm" &&
@@ -877,10 +898,24 @@ function App() {
               <div className="panel-heading">
                 <div>
                   <p className="eyebrow">Perps</p>
-                  <h2>Open positions</h2>
+                  <h2>Positions and orders</h2>
                 </div>
               </div>
-              <PositionsTable data={accountQuery.data} />
+              <div className="perps-sections">
+                <section className="perps-section">
+                  <h3>Open positions</h3>
+                  <PositionsTable data={accountQuery.data} />
+                </section>
+                <section className="perps-section">
+                  <h3>Open orders</h3>
+                  <OpenOrdersTable
+                    data={accountQuery.data}
+                    canCancel={canOperateCurrentView}
+                    busyAction={busyAction}
+                    onCancel={submitCancelOrder}
+                  />
+                </section>
+              </div>
             </section>
 
             {canOperateCurrentView ? (
@@ -1349,6 +1384,77 @@ function PositionsTable({ data }: { data?: AccountSnapshot }) {
   );
 }
 
+function OpenOrdersTable({
+  data,
+  canCancel,
+  busyAction,
+  onCancel,
+}: {
+  data?: AccountSnapshot;
+  canCancel: boolean;
+  busyAction: string | null;
+  onCancel: (order: OpenOrderRow) => void;
+}) {
+  if (!data?.openOrders.length) {
+    return <div className="empty-state">No open orders.</div>;
+  }
+
+  return (
+    <div className="table-wrap compact">
+      <table>
+        <thead>
+          <tr>
+            <th>Market</th>
+            <th>Side</th>
+            <th>Price</th>
+            <th>Size</th>
+            <th>Notional</th>
+            <th>Placed</th>
+            {canCancel ? <th>Action</th> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {data.openOrders.map((order) => {
+            const cancelBusy = busyAction === `cancel-${order.orderId}`;
+
+            return (
+              <tr key={`${order.marketType}-${order.orderId}`}>
+                <td>
+                  <strong>{order.symbol}</strong>
+                  <span className="table-subtext">
+                    {order.marketType === "spot" ? "Spot" : "Perp"}
+                    {order.reduceOnly ? " reduce only" : ""}
+                  </span>
+                </td>
+                <td className={order.side === "buy" ? "green" : "red"}>
+                  {order.side}
+                </td>
+                <td>{formatNumber(order.limitPrice)}</td>
+                <td>{formatNumber(order.size)}</td>
+                <td>{formatUsd(order.notionalUsd)}</td>
+                <td>{formatDateTime(order.timestamp)}</td>
+                {canCancel ? (
+                  <td>
+                    <button
+                      type="button"
+                      className="table-action-button"
+                      disabled={cancelBusy || order.assetId < 0}
+                      onClick={() => onCancel(order)}
+                    >
+                      <XCircle size={15} />
+                      {cancelBusy ? "Canceling" : "Cancel"}
+                    </button>
+                  </td>
+                ) : null}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function getWithdrawChain(id: WithdrawChainId) {
   return WITHDRAW_CHAINS.find((chain) => chain.id === id) ?? WITHDRAW_CHAINS[0];
 }
@@ -1475,6 +1581,15 @@ function formatUsd(value?: string) {
     currency: "USD",
     maximumFractionDigits: 2,
   }).format(Number(value ?? 0));
+}
+
+function formatDateTime(value: number) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function shortAddress(value?: string) {

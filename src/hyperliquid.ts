@@ -101,6 +101,24 @@ export type PositionRow = {
   marginUsed: string;
 };
 
+export type OpenOrderRow = {
+  assetId: number;
+  orderId: number;
+  clientOrderId: `0x${string}` | null;
+  marketType: "perp" | "spot";
+  symbol: string;
+  base: string | null;
+  quote: string | null;
+  side: "buy" | "sell";
+  limitPrice: string;
+  size: string;
+  originalSize: string;
+  notionalUsd: string;
+  reduceOnly: boolean;
+  timestamp: number;
+  placedAt: string;
+};
+
 export type AccountSnapshot = {
   accountMode: {
     mode: AccountAbstractionMode;
@@ -120,6 +138,7 @@ export type AccountSnapshot = {
     marginUsed: string;
   };
   positions: PositionRow[];
+  openOrders: OpenOrderRow[];
 };
 
 export type WithdrawSourceDex = "" | "spot";
@@ -149,12 +168,20 @@ export async function loadAgentRole(
 export async function loadAccountSnapshot(
   user: `0x${string}`,
 ): Promise<AccountSnapshot> {
-  const [spotState, spotMetaAndAssetCtxs, clearinghouseState, accountMode] =
-    await Promise.all([
+  const [
+    spotState,
+    spotMetaAndAssetCtxs,
+    clearinghouseState,
+    accountMode,
+    openOrders,
+    perpsMeta,
+  ] = await Promise.all([
       publicClient.spotClearinghouseState({ user }),
       publicClient.spotMetaAndAssetCtxs(),
       publicClient.clearinghouseState({ user }),
       loadAccountMode(user),
+      publicClient.openOrders({ user }),
+      publicClient.meta(),
     ]);
   const [spotMeta, spotAssetCtxs] = spotMetaAndAssetCtxs;
 
@@ -247,6 +274,9 @@ export async function loadAccountSnapshot(
       marginUsed: clearinghouseState.marginSummary.totalMarginUsed,
     },
     positions,
+    openOrders: openOrders.map((order) =>
+      normalizeOpenOrder(order, spotMeta, perpsMeta),
+    ),
   };
 }
 
@@ -257,6 +287,16 @@ export function createHyperWalletClient(wallet: HyperliquidSigner) {
     wallet,
     transport: new hl.HttpTransport(),
     signatureChainId: "0xa4b1",
+  });
+}
+
+export async function cancelOpenOrder(
+  wallet: HyperliquidSigner,
+  order: { assetId: number; orderId: number },
+) {
+  const client = createHyperWalletClient(wallet);
+  return client.cancel({
+    cancels: [{ a: order.assetId, o: order.orderId }],
   });
 }
 
@@ -499,6 +539,68 @@ function buildSpotPriceMap(
   });
 
   return priceByTokenIndex;
+}
+
+function normalizeOpenOrder(
+  order: Awaited<ReturnType<typeof publicClient.openOrders>>[number],
+  spotMeta: Awaited<ReturnType<typeof publicClient.spotMeta>>,
+  perpsMeta: Awaited<ReturnType<typeof publicClient.meta>>,
+): OpenOrderRow {
+  const market = describeOrderMarket(order.coin, spotMeta, perpsMeta);
+  const limitPrice = Number(order.limitPx);
+  const size = Number(order.sz);
+
+  return {
+    ...market,
+    orderId: order.oid,
+    clientOrderId: order.cloid ?? null,
+    side: order.side === "B" ? "buy" : "sell",
+    limitPrice: order.limitPx,
+    size: order.sz,
+    originalSize: order.origSz,
+    notionalUsd:
+      Number.isFinite(limitPrice) && Number.isFinite(size)
+        ? (limitPrice * size).toString()
+        : "0",
+    reduceOnly: order.reduceOnly === true,
+    timestamp: order.timestamp,
+    placedAt: new Date(order.timestamp).toISOString(),
+  };
+}
+
+function describeOrderMarket(
+  coin: string,
+  spotMeta: Awaited<ReturnType<typeof publicClient.spotMeta>>,
+  perpsMeta: Awaited<ReturnType<typeof publicClient.meta>>,
+) {
+  if (coin.startsWith("@")) {
+    const spotPairIndex = Number(coin.slice(1));
+    const universe = spotMeta.universe.find(
+      (spotUniverse) => spotUniverse.index === spotPairIndex,
+    );
+    const baseToken = universe
+      ? spotMeta.tokens.find((token) => token.index === universe.tokens[0])
+      : null;
+    const quoteToken = universe
+      ? spotMeta.tokens.find((token) => token.index === universe.tokens[1])
+      : null;
+
+    return {
+      assetId: 10000 + spotPairIndex,
+      marketType: "spot" as const,
+      symbol: universe?.name ?? coin,
+      base: baseToken?.name ?? null,
+      quote: quoteToken?.name ?? null,
+    };
+  }
+
+  return {
+    assetId: perpsMeta.universe.findIndex((asset) => asset.name === coin),
+    marketType: "perp" as const,
+    symbol: coin,
+    base: coin,
+    quote: "USDC",
+  };
 }
 
 function sumNumbers(values: number[]) {
