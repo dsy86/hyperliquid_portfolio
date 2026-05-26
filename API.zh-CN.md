@@ -1,210 +1,192 @@
-# API 中文文档
+# Hyperliquid Portfolio API 中文文档
 
-## Portfolio API
+基础 URL：
 
-查询一个 Hyperliquid 账户的余额、当前挂单和 Perps 持仓。
+```text
+https://hyperliquid-portfolio.pages.dev
+```
+
+当前网页前端使用以下 API 作为 Hyperliquid 数据和操作层：
+
+- `GET /api/snapshot`
+- `GET /api/agent-role`
+- `GET /api/cctp-fee`
+- `POST /api/actions/prepare`
+- `POST /api/actions/submit`
+
+旧的 `GET /api/portfolio` 已删除。它不是前端数据源，并且与新的 `GET /api/snapshot` 功能重叠。
+
+## 签名模型
+
+API 不保存私钥，也不会替用户完成签名。
+
+所有需要 Hyperliquid 签名的操作使用以下流程：
+
+1. 调用 `POST /api/actions/prepare`，传入要执行的操作参数。
+2. 客户端使用用户钱包或 Agent Wallet 对返回的 `action` 签名。
+3. 调用 `POST /api/actions/submit`，提交 `action`、`signature` 和 `nonce`。
+
+网页前端在第 2 步通过浏览器钱包完成签名。TG bot 或其他服务也可以复用同一套 API，只要自己完成签名即可。
+
+## 通用错误格式
+
+错误返回是 JSON：
+
+```json
+{
+  "error": "ERROR_CODE",
+  "message": "可读错误信息"
+}
+```
+
+## GET /api/snapshot
+
+返回前端使用的账户快照：账户模式、余额、汇总数据、Perps 持仓和当前挂单。
 
 ### 请求
 
 ```http
-GET /api/portfolio?address=0x...
+GET /api/snapshot?address=0x...
 ```
 
-生产环境 URL：
-
-```text
-https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
-```
-
-#### 查询参数
+### 查询参数
 
 | 名称 | 必填 | 说明 |
 | --- | --- | --- |
-| `address` | 是 | 要查询的 EVM 地址。必须是 42 个字符的 `0x` 地址。 |
+| `address` | 是 | 要查询的 EVM 地址，必须是 `0x` 地址。 |
 
-### 返回值
-
-#### 成功返回
-
-状态码：`200 OK`
+### 成功返回
 
 ```json
 {
-  "address": "0xaf68caebaa151dd592112a07e2344b3950e13561",
-  "accountType": "manual",
-  "summary": {
-    "accountValueUsd": 26850.923366,
-    "spotAccountValueUsd": 0,
-    "perpsAccountValueUsd": 26850.923366,
-    "withdrawableUsd": 6705.656206,
-    "marginUsedUsd": 20145.26716
+  "accountMode": {
+    "mode": "default",
+    "isUnified": false
   },
-  "assets": [
+  "summary": {
+    "accountValue": "27105.276532",
+    "perpAccountValue": "27105.276532",
+    "spotAccountValue": "0",
+    "withdrawable": "17289.848266",
+    "marginUsed": "9815.428266"
+  },
+  "spotBalances": [
     {
-      "account": "spot",
       "coin": "USDC",
+      "tokenId": "0x6d1e7cde53ba9467b783cb7c530ce054",
+      "tokenKey": "USDC:0x6d1e7cde53ba9467b783cb7c530ce054",
       "total": "0.0",
       "hold": "0.0",
       "available": "0",
-      "priceUsd": 1,
-      "valueUsd": 0
+      "entryNtl": "0.0"
+    }
+  ],
+  "perp": {
+    "accountValue": "27105.276532",
+    "withdrawable": "17289.848266",
+    "marginUsed": "9815.428266"
+  },
+  "positions": [
+    {
+      "coin": "ETH",
+      "assetId": 1,
+      "size": "14.0488",
+      "value": "29446.2848",
+      "pnl": "-5.61952",
+      "marginUsed": "9815.428266"
     }
   ],
   "openOrders": [
     {
-      "market": {
-        "type": "perp",
-        "symbol": "ETH",
-        "base": "ETH",
-        "quote": "USDC"
-      },
-      "side": "buy",
-      "limitPrice": "2118.1",
-      "size": "26.754",
-      "originalSize": "26.754",
-      "notionalUsd": 56667.6474,
-      "orderId": 441402764187,
-      "clientOrderId": "0x00000000000000000000019e5430f8bd",
+      "assetId": 1,
+      "marketType": "perp",
+      "symbol": "ETH",
+      "base": "ETH",
+      "quote": "USDC",
+      "orderId": 442842219919,
+      "clientOrderId": "0x00000000000000000000019e554b606e",
+      "side": "sell",
+      "limitPrice": "2095.9",
+      "size": "15.1324",
+      "originalSize": "15.1324",
+      "notionalUsd": "31715.997160000003",
       "reduceOnly": false,
-      "timestamp": 1779701784790,
-      "placedAt": "2026-05-25T09:36:24.790Z"
+      "timestamp": 1779788868199,
+      "placedAt": "2026-05-26T09:47:48.199Z"
     }
-  ],
-  "perps": {
-    "account": {
-      "collateral": "USDC",
-      "accountValueUsd": 26850.923366,
-      "withdrawableUsd": 6705.656206,
-      "marginUsedUsd": 20145.26716
-    },
-    "positions": [
-      {
-        "coin": "ETH",
-        "size": "-28.5492",
-        "valueUsd": 60435.80148,
-        "unrealizedPnlUsd": -48.697632,
-        "marginUsedUsd": 20145.26716
-      }
-    ]
-  }
+  ]
 }
 ```
 
 ### 字段说明
 
-#### 顶层字段
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `accountMode.mode` | string | Hyperliquid 原始账户模式，例如 `default`、`unifiedAccount`、`portfolioMargin`。 |
+| `accountMode.isUnified` | boolean | Unified Account 和 Portfolio Margin 下为 `true`。 |
+| `summary.accountValue` | string | 账户总价值估算。Manual 模式下为 Perps account value 加 Spot 估值；统一账户模式下使用当前应用的统一估算逻辑。 |
+| `summary.perpAccountValue` | string | Hyperliquid clearinghouse state 返回的 Perps 账户价值。 |
+| `summary.spotAccountValue` | string | Spot 账户估值。USDC 固定按 1 估值，其他 Spot 资产优先使用 Hyperliquid Spot mark/mid price。 |
+| `summary.withdrawable` | string | 可提现金额估算。Manual 模式会合并 Perps 可提现 USDC 和 Spot 可用 USDC。 |
+| `summary.marginUsed` | string | Perps 持仓当前占用保证金。 |
+| `spotBalances[]` | array | Spot 或统一账户余额行。 |
+| `perp` | object | Hyperliquid clearinghouse state 返回的 Perps 账户汇总。 |
+| `positions[]` | array | 当前 Perps 持仓。它们是已成交形成的仓位，不是挂单。 |
+| `openOrders[]` | array | 当前开放的 Spot 和 Perps 挂单；已成交或已取消订单不包含在内。 |
+
+#### `spotBalances[]`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `address` | string | 被查询的钱包地址。 |
-| `accountType` | string | Hyperliquid 账户模式。可能值为 `manual`、`unified`、`portfolio`。 |
-| `summary` | object | 账户级别的 USD 汇总数据。 |
-| `assets` | array | Spot、Unified 或 Portfolio Margin 模式下的资产余额。 |
-| `openOrders` | array | 当前仍然开放的挂单。包含 Spot 和 Perps 挂单；已成交或已取消订单不会出现在这里。 |
-| `perps` | object | Perps 账户汇总和当前持仓。 |
-
-#### `summary`
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `accountValueUsd` | number | 账户总价值的 USD 估算。Manual 账户下等于 Perps account value 加 Spot 资产估值；Unified 和 Portfolio Margin 账户下使用当前应用里的统一账户估算逻辑。 |
-| `spotAccountValueUsd` | number | `assets` 中所有资产的 USD 估算总值。 |
-| `perpsAccountValueUsd` | number | Hyperliquid clearinghouse state 返回的 Perps 账户价值。 |
-| `withdrawableUsd` | number | 当前可提现金额的 USD 估算。Manual 账户下会合并 Perps 可提现 USDC 和 Spot 可用 USDC。 |
-| `marginUsedUsd` | number | Perps 持仓当前占用的保证金，单位为 USD。 |
-
-#### `assets[]`
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `account` | string | 余额所在账户桶。Manual 模式的 Spot 余额为 `spot`；Unified 模式为 `unified`；Portfolio Margin 模式为 `portfolioMargin`。 |
 | `coin` | string | 代币符号。 |
-| `total` | string | 代币总余额。包含被 Spot 挂单锁定的数量。 |
-| `hold` | string | 被 Spot 挂单锁定的数量。例如，Spot 卖单会锁定 base token，Spot 买单会锁定 quote token。 |
-| `available` | string | 可用余额，按 `total - hold` 计算。 |
-| `priceUsd` | number or null | 用于估值的 USD 价格。`USDC` 固定按 `1` 估值；其他资产优先使用 Hyperliquid Spot 市场价格。 |
-| `valueUsd` | number | `total` 对应的 USD 估算价值。 |
+| `tokenId` | string or null | Hyperliquid Spot token ID。 |
+| `tokenKey` | string or null | Hyperliquid Spot 发送类动作使用的 token key，格式为 `SYMBOL:tokenId`。 |
+| `total` | string | 代币总余额，包含被锁定数量。 |
+| `hold` | string | 被 Spot 挂单锁定的数量。 |
+| `available` | string | 可用数量，按 `total - hold` 计算。 |
+| `entryNtl` | string | Hyperliquid spot clearinghouse state 返回的 entry notional。 |
+
+#### `positions[]`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `coin` | string | Perps 市场符号。 |
+| `assetId` | number | Hyperliquid Perps asset index，下单和撤单时使用。 |
+| `size` | string | 仓位大小。正数表示多仓，负数表示空仓。 |
+| `value` | string | 当前仓位名义价值。 |
+| `pnl` | string | 未实现盈亏。 |
+| `marginUsed` | string | 该仓位占用保证金。 |
 
 #### `openOrders[]`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `market` | object | 订单对应的市场元数据。 |
-| `side` | string | 订单方向：`buy` 或 `sell`。 |
-| `limitPrice` | string | 限价价格。 |
-| `size` | string | 当前仍未成交的订单数量。 |
-| `originalSize` | string | 下单时的原始订单数量。 |
-| `notionalUsd` | number | 订单名义价值估算，按 `limitPrice * size` 计算。 |
-| `orderId` | number | Hyperliquid 订单 ID。 |
-| `clientOrderId` | string or null | 下单时传入的客户端订单 ID；如果没有传则为 `null`。 |
-| `reduceOnly` | boolean | 是否为只减仓订单。只减仓订单只能减少已有 Perps 仓位。 |
-| `timestamp` | number | 下单时间，Unix 毫秒时间戳。 |
-| `placedAt` | string | 下单时间，ISO 8601 UTC 字符串。 |
-
-#### `openOrders[].market`
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `type` | string | 市场类型：`spot` 或 `perp`。 |
-| `symbol` | string | 市场显示符号。Perps 通常是 base asset，例如 `ETH`。 |
+| `assetId` | number | 撤单所需的 Hyperliquid asset ID。Perps 使用 Perps asset index；Spot 使用 `10000 + spotPairIndex`。 |
+| `marketType` | string | `perp` 或 `spot`。 |
+| `symbol` | string | 市场显示符号。 |
 | `base` | string or null | Base asset 符号。 |
-| `quote` | string or null | Quote asset 符号，通常为 `USDC`。 |
+| `quote` | string or null | Quote asset 符号。 |
+| `orderId` | number | Hyperliquid 订单 ID。 |
+| `clientOrderId` | string or null | 可选客户端订单 ID。 |
+| `side` | string | `buy` 或 `sell`。 |
+| `limitPrice` | string | 限价价格。 |
+| `size` | string | 当前仍未成交的数量。 |
+| `originalSize` | string | 下单时原始数量。 |
+| `notionalUsd` | string | 名义价值估算，按 `limitPrice * size` 计算。 |
+| `reduceOnly` | boolean | 是否只减仓。 |
+| `timestamp` | number | 下单时间，Unix 毫秒时间戳。 |
+| `placedAt` | string | ISO 8601 UTC 时间。 |
 
-#### `perps`
+### 错误
 
-| 字段 | 类型 | 说明 |
+| 状态码 | 错误码 | 说明 |
 | --- | --- | --- |
-| `account` | object or null | Manual 账户下的 Perps 账户汇总。Unified 和 Portfolio Margin 账户下为 `null`，因为 Perps 和 Spot 余额已经统一。 |
-| `positions` | array | 当前 Perps 持仓。这些是已经成交形成的仓位，不是挂单。 |
+| `400` | `INVALID_ADDRESS` | 缺少或传入了无效的 `address`。 |
+| `502` | `SNAPSHOT_LOAD_FAILED` | 上游 Hyperliquid info 请求失败。 |
 
-#### `perps.account`
+## GET /api/agent-role
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `collateral` | string | 默认 Perps 账户的抵押资产，目前为 `USDC`。 |
-| `accountValueUsd` | number | Perps 账户价值，单位为 USD。 |
-| `withdrawableUsd` | number | Perps 账户中可提现金额，单位为 USD。 |
-| `marginUsedUsd` | number | 当前 Perps 持仓占用的保证金，单位为 USD。 |
-
-#### `perps.positions[]`
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `coin` | string | Perps 市场符号。 |
-| `size` | string | 仓位大小。正数表示多头，负数表示空头。 |
-| `valueUsd` | number | 当前仓位名义价值，单位为 USD。 |
-| `unrealizedPnlUsd` | number | 未实现盈亏，单位为 USD。 |
-| `marginUsedUsd` | number | 该仓位占用的保证金，单位为 USD。 |
-
-### 错误返回
-
-#### 地址无效
-
-状态码：`400 Bad Request`
-
-```json
-{
-  "error": "INVALID_ADDRESS",
-  "message": "Pass a valid EVM address as ?address=0x..."
-}
-```
-
-#### Portfolio 加载失败
-
-状态码：`502 Bad Gateway`
-
-```json
-{
-  "error": "PORTFOLIO_LOAD_FAILED",
-  "message": "Hyperliquid info request failed: 500"
-}
-```
-
-这通常表示某个上游 Hyperliquid info 请求失败。
-
-## Agent Role API
-
-查询一个地址是否是 Hyperliquid Agent Wallet；如果是，返回它被授权操作的 Master Wallet。
+查询某个地址是否是 Hyperliquid Agent Wallet；如果是，返回它被授权操作的 Master Wallet。
 
 ### 请求
 
@@ -212,21 +194,7 @@ https://hyperliquid-portfolio.pages.dev/api/portfolio?address=0x...
 GET /api/agent-role?address=0x...
 ```
 
-生产环境 URL：
-
-```text
-https://hyperliquid-portfolio.pages.dev/api/agent-role?address=0x...
-```
-
-### 查询参数
-
-| 名称 | 必填 | 说明 |
-| --- | --- | --- |
-| `address` | 是 | 要查询的 EVM 地址。必须是 42 个字符的 `0x` 地址。 |
-
 ### 成功返回
-
-状态码：`200 OK`
 
 ```json
 {
@@ -238,34 +206,201 @@ https://hyperliquid-portfolio.pages.dev/api/agent-role?address=0x...
 
 如果该地址不是 Agent Wallet，`masterAddress` 为 `null`。
 
-### 字段说明
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `address` | string | 被查询地址。 |
+| `role` | string | Hyperliquid 角色，例如 `agent`、`user`、`vault`、`subAccount`、`missing`。 |
+| `masterAddress` | string or null | 该 Agent Wallet 被授权操作的 Master Wallet。仅当 `role = agent` 时有值。 |
+
+### 错误
+
+| 状态码 | 错误码 | 说明 |
+| --- | --- | --- |
+| `400` | `INVALID_ADDRESS` | 缺少或传入了无效的 `address`。 |
+| `502` | `AGENT_ROLE_LOAD_FAILED` | 上游 Hyperliquid 请求失败。 |
+
+## GET /api/cctp-fee
+
+返回提现 UI 使用的 Circle CCTP forwarding fee。
+
+### 请求
+
+```http
+GET /api/cctp-fee?destinationChainId=3
+```
+
+### 查询参数
+
+| 名称 | 必填 | 说明 |
+| --- | --- | --- |
+| `destinationChainId` | 是 | Circle CCTP fee endpoint 使用的目标 domain/chain ID。 |
+
+### 成功返回
+
+```json
+{
+  "minimumFeeBps": 0,
+  "forwardFeeUsdc": "0.214429",
+  "finalityThreshold": 1000
+}
+```
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `address` | string | 被查询的钱包地址。 |
-| `role` | string | 该地址在 Hyperliquid 中的角色，例如 `agent`、`user`、`vault`、`subAccount` 或 `missing`。 |
-| `masterAddress` | string or null | 该 Agent Wallet 被授权操作的 Master Wallet。仅当 `role` 为 `agent` 时有值。 |
+| `minimumFeeBps` | number | 最低费率，单位 bps。 |
+| `forwardFeeUsdc` | string | 预估 forwarding fee，单位 USDC。 |
+| `finalityThreshold` | number | Circle fee endpoint 返回的 finality threshold。 |
 
-### 错误返回
+### 错误
 
-#### 地址无效
+| 状态码 | 错误码 | 说明 |
+| --- | --- | --- |
+| `400` | `INVALID_DESTINATION_CHAIN` | 缺少或传入了无效的目标 chain ID。 |
+| `502` | `CCTP_FEE_LOAD_FAILED` | Circle fee 请求失败。 |
 
-状态码：`400 Bad Request`
+## POST /api/actions/prepare
+
+构造一个待签名的 Hyperliquid action。这个接口不会把操作提交到 Hyperliquid。
+
+### 请求
+
+```http
+POST /api/actions/prepare
+Content-Type: application/json
+```
+
+### 支持的 Action 类型
+
+| `type` | 必填字段 | 说明 |
+| --- | --- | --- |
+| `cancelOrder` | `assetId`, `orderId` | 构造撤单 action。 |
+| `closePosition` | `coin`, `size` | 构造 reduce-only IOC 平仓单。`size` 为正数时卖出平多，为负数时买入平空。 |
+| `usdClassTransfer` | `amount`, `toPerp` | Manual 模式下在 Spot 和 Perps 之间转移 USDC。 |
+| `usdSend` | `destination`, `amount` | 从 Perps USDC 余额发送给另一个 HyperCore 地址。 |
+| `spotSend` | `destination`, `token`, `amount` | 发送 Spot 资产到另一个 HyperCore 地址。 |
+| `sendAsset` | `destination`, `token`, `amount` | 发送 Unified Account 资产。可选：`sourceDex`、`destinationDex`、`fromSubAccount`。 |
+| `setAccountMode` | `user`, `abstraction` | 修改账户模式。`abstraction` 为 `disabled`、`unifiedAccount` 或 `portfolioMargin`。 |
+| `approveAgent` | `agentAddress` | 授权 unnamed Agent Wallet。可选：`agentName`。 |
+| `withdraw3` | `destination`, `amount` | 通过旧 Hyperliquid bridge 提现 USDC 到 Arbitrum。 |
+| `sendToEvmWithData` | `destination`, `amount`, `destinationChainId` | 通过 CCTP 提现 USDC。可选：`sourceDex`、`signatureChainId`。 |
+| `withdrawHyperEvm` | `amount` | 提现 USDC 到 HyperEVM 系统地址。可选：`sourceDex`。 |
+
+### 示例：构造撤单
 
 ```json
 {
-  "error": "INVALID_ADDRESS",
-  "message": "Pass a valid EVM address as ?address=0x..."
+  "type": "cancelOrder",
+  "assetId": 1,
+  "orderId": 442842219919
 }
 ```
 
-#### Agent Role 加载失败
+### L1 Action 成功返回
 
-状态码：`502 Bad Gateway`
+L1 action 使用 Hyperliquid L1 action 签名。
 
 ```json
 {
-  "error": "AGENT_ROLE_LOAD_FAILED",
-  "message": "Hyperliquid info request failed: 500"
+  "signatureKind": "l1",
+  "action": {
+    "type": "cancel",
+    "cancels": [
+      { "a": 1, "o": 442842219919 }
+    ]
+  },
+  "nonce": 1779788816584
 }
 ```
+
+### User-Signed Action 成功返回
+
+User-signed action 是 EIP-712 typed-data action。
+
+```json
+{
+  "signatureKind": "user",
+  "action": {
+    "type": "usdSend",
+    "hyperliquidChain": "Mainnet",
+    "signatureChainId": "0xa4b1",
+    "destination": "0xRecipient",
+    "amount": "5",
+    "time": 1779788816584
+  },
+  "nonce": 1779788816584,
+  "chainId": 42161,
+  "types": {
+    "HyperliquidTransaction:UsdSend": [
+      { "name": "hyperliquidChain", "type": "string" },
+      { "name": "destination", "type": "string" },
+      { "name": "amount", "type": "string" },
+      { "name": "time", "type": "uint64" }
+    ]
+  }
+}
+```
+
+### 错误
+
+| 状态码 | 错误码 | 说明 |
+| --- | --- | --- |
+| `400` | `INVALID_JSON` | 请求体不是 JSON。 |
+| `400` | `ACTION_PREPARE_FAILED` | 参数校验失败或 action 构造失败。 |
+
+## POST /api/actions/submit
+
+把已经签名的 Hyperliquid action 提交到 exchange endpoint。
+
+### 请求
+
+```http
+POST /api/actions/submit
+Content-Type: application/json
+```
+
+```json
+{
+  "action": {
+    "type": "cancel",
+    "cancels": [
+      { "a": 1, "o": 442842219919 }
+    ]
+  },
+  "signature": {
+    "r": "0x...",
+    "s": "0x...",
+    "v": 27
+  },
+  "nonce": 1779788816584
+}
+```
+
+可选字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `vaultAddress` | 可选 Hyperliquid vault 地址。 |
+| `expiresAfter` | 可选过期时间，Unix 毫秒时间戳。 |
+
+### 成功返回
+
+返回上游 Hyperliquid exchange response。
+
+```json
+{
+  "status": "ok",
+  "response": {
+    "type": "default"
+  }
+}
+```
+
+### 错误
+
+| 状态码 | 错误码 | 说明 |
+| --- | --- | --- |
+| `400` | `INVALID_JSON` | 请求体不是 JSON。 |
+| `400` | `INVALID_PAYLOAD` | 缺少 `action`、`signature` 或 `nonce`。 |
+| `502` | `HYPERLIQUID_ACTION_FAILED` | Hyperliquid 返回错误；可用时会附带 `result`。 |
+| `502` | `ACTION_SUBMIT_FAILED` | 网络或上游解析失败。 |
+
