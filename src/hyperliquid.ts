@@ -1,6 +1,6 @@
 import * as hl from "@nktkas/hyperliquid";
 import { signUserSignedAction } from "@nktkas/hyperliquid/signing";
-import type { WalletClient } from "viem";
+import type { AbstractWallet } from "@nktkas/hyperliquid/signing";
 
 export const ARBITRUM_NATIVE_USDC =
   "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as const;
@@ -250,7 +250,9 @@ export async function loadAccountSnapshot(
   };
 }
 
-export function createHyperWalletClient(wallet: WalletClient) {
+export type HyperliquidSigner = AbstractWallet;
+
+export function createHyperWalletClient(wallet: HyperliquidSigner) {
   return new hl.WalletClient({
     wallet,
     transport: new hl.HttpTransport(),
@@ -259,28 +261,28 @@ export function createHyperWalletClient(wallet: WalletClient) {
 }
 
 export async function activateUnifiedAccountMode(
-  wallet: WalletClient,
+  wallet: HyperliquidSigner,
   user: `0x${string}`,
 ) {
   return setUserAbstraction(wallet, user, "unifiedAccount");
 }
 
 export async function activatePortfolioMarginMode(
-  wallet: WalletClient,
+  wallet: HyperliquidSigner,
   user: `0x${string}`,
 ) {
   return setUserAbstraction(wallet, user, "portfolioMargin");
 }
 
 export async function disableUnifiedAccountMode(
-  wallet: WalletClient,
+  wallet: HyperliquidSigner,
   user: `0x${string}`,
 ) {
   return setUserAbstraction(wallet, user, "disabled");
 }
 
 export async function sendUnifiedAsset(
-  wallet: WalletClient,
+  wallet: HyperliquidSigner,
   args: {
     destination: `0x${string}`;
     token: `${string}:0x${string}`;
@@ -320,7 +322,7 @@ export async function sendUnifiedAsset(
 }
 
 export async function withdrawToEvmWithData(
-  wallet: WalletClient,
+  wallet: HyperliquidSigner,
   args: {
     destination: `0x${string}`;
     amount: string;
@@ -364,7 +366,7 @@ export async function withdrawToEvmWithData(
 }
 
 export async function withdrawToHyperEvm(
-  wallet: WalletClient,
+  wallet: HyperliquidSigner,
   args: {
     amount: string;
     sourceDex: WithdrawSourceDex;
@@ -437,7 +439,7 @@ export async function loadCctpFeeQuote(
 }
 
 async function setUserAbstraction(
-  wallet: WalletClient,
+  wallet: HyperliquidSigner,
   user: `0x${string}`,
   abstraction: "unifiedAccount" | "portfolioMargin" | "disabled",
 ) {

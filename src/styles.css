@@ -209,6 +209,23 @@ h2 {
   gap: 12px;
 }
 
+.signer-access {
+  display: grid;
+  grid-template-columns: auto minmax(260px, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.signer-access.compact {
+  grid-template-columns: auto minmax(220px, 320px);
+}
+
+.private-key-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
 .wallet-tab-row,
 .agent-approval-form {
   display: grid;
@@ -604,6 +621,9 @@ select:focus {
 
   .portfolio-tabs-band,
   .tab-panel,
+  .signer-access,
+  .signer-access.compact,
+  .private-key-form,
   .wallet-tab-row,
   .agent-approval-form,
   .summary-band,

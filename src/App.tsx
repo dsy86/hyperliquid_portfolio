@@ -18,6 +18,7 @@ import {
   useWalletClient,
 } from "wagmi";
 import { parseUnits, isAddress } from "viem";
+import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import {
   ARBITRUM_NATIVE_USDC,
   HYPERLIQUID_BRIDGE2,
@@ -34,6 +35,7 @@ import {
   withdrawToHyperEvm,
   type AccountSnapshot,
   type CctpFeeQuote,
+  type HyperliquidSigner,
   type WithdrawSourceDex,
 } from "./hyperliquid";
 import { hasWalletConnect, primaryChain } from "./wagmi";
@@ -70,6 +72,7 @@ const emptyBridge = {
   destination: "",
   chain: "arbitrum" as WithdrawChainId,
 };
+const PRIVATE_KEY_PATTERN = /^0x[a-fA-F0-9]{64}$/;
 const MIN_ARBITRUM_DEPOSIT_USDC = 5;
 const WITHDRAW_CHAINS: WithdrawChain[] = [
   {
@@ -99,13 +102,16 @@ const WITHDRAW_CHAINS: WithdrawChain[] = [
 ];
 
 function App() {
-  const { address, isConnected, chainId } = useAccount();
+  const { address: browserAddress, chainId } = useAccount();
   const { open } = useAppKit();
   const { disconnect } = useDisconnect();
   const { switchChainAsync } = useSwitchChain();
   const { data: walletClient } = useWalletClient();
   const queryClient = useQueryClient();
 
+  const [importedAccount, setImportedAccount] =
+    useState<PrivateKeyAccount | null>(null);
+  const [privateKeyInput, setPrivateKeyInput] = useState("");
   const [transferForm, setTransferForm] = useState(emptyTransfer);
   const [sendForm, setSendForm] = useState(emptySend);
   const [depositForm, setDepositForm] = useState({ amount: "" });
@@ -116,11 +122,20 @@ function App() {
   const [activeTab, setActiveTab] = useState<PortfolioTab>("readonly");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const activeAddress = importedAccount?.address ?? browserAddress ?? null;
+  const activeSigner = (importedAccount ?? walletClient ?? null) as
+    | HyperliquidSigner
+    | null;
+  const signerKind = importedAccount
+    ? "private-key"
+    : browserAddress
+      ? "wallet"
+      : "none";
 
   const agentRoleQuery = useQuery({
-    queryKey: ["hyperliquid-agent-role", address],
-    queryFn: () => loadAgentRole(address!),
-    enabled: Boolean(address),
+    queryKey: ["hyperliquid-agent-role", activeAddress],
+    queryFn: () => loadAgentRole(activeAddress!),
+    enabled: Boolean(activeAddress),
     refetchOnWindowFocus: false,
   });
   const accountQuery = useQuery({
@@ -138,18 +153,29 @@ function App() {
   const isManualMode = accountType === "manual";
   const isSharedBalanceMode = !isManualMode;
   const agentMasterAddress = agentRoleQuery.data?.masterAddress ?? null;
-  const canSignForViewedAddress = Boolean(
-    address &&
+  const isViewingOwnSigner = Boolean(
+    activeAddress &&
       viewAddress &&
-      (address.toLowerCase() === viewAddress.toLowerCase() ||
-        agentMasterAddress?.toLowerCase() === viewAddress.toLowerCase()),
+      activeAddress.toLowerCase() === viewAddress.toLowerCase(),
   );
-  const canOperateCurrentView =
-    activeTab !== "readonly" && canSignForViewedAddress;
+  const isViewingAgentMaster = Boolean(
+    agentMasterAddress &&
+      viewAddress &&
+      agentMasterAddress.toLowerCase() === viewAddress.toLowerCase(),
+  );
+  const canSignForViewedAddress = Boolean(
+    activeSigner && (isViewingOwnSigner || isViewingAgentMaster),
+  );
+  const canOperateCurrentView = Boolean(
+    activeSigner &&
+      ((activeTab === "wallet" && isViewingOwnSigner) ||
+        (activeTab === "agent" && isViewingAgentMaster)),
+  );
   const canDepositCurrentView =
     activeTab === "wallet" &&
-    Boolean(address && viewAddress) &&
-    address?.toLowerCase() === viewAddress?.toLowerCase();
+    signerKind === "wallet" &&
+    Boolean(browserAddress && viewAddress && walletClient) &&
+    browserAddress?.toLowerCase() === viewAddress?.toLowerCase();
   const shouldShowClassTransfer = canOperateCurrentView && isManualMode;
   const selectedWithdrawChain = getWithdrawChain(withdrawForm.chain);
   const withdrawFeeQuery = useQuery({
@@ -165,12 +191,29 @@ function App() {
   });
 
   useEffect(() => {
-    if (address && !viewAddress && !lookupAddress) {
-      setLookupAddress(address);
-      setViewAddress(address);
+    if (activeAddress && !viewAddress && !lookupAddress) {
+      setLookupAddress(activeAddress);
+      setViewAddress(activeAddress);
       setActiveTab("wallet");
     }
-  }, [address, lookupAddress, viewAddress]);
+  }, [activeAddress, lookupAddress, viewAddress]);
+
+  useEffect(() => {
+    if (activeTab === "wallet" && activeAddress) {
+      setLookupAddress(activeAddress);
+      setViewAddress(activeAddress);
+    }
+  }, [activeAddress, activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "agent" && agentMasterAddress) {
+      setLookupAddress(agentMasterAddress);
+      setViewAddress(agentMasterAddress);
+    } else if (activeTab === "agent" && activeAddress && !agentRoleQuery.isLoading) {
+      setLookupAddress("");
+      setViewAddress(null);
+    }
+  }, [activeAddress, activeTab, agentMasterAddress, agentRoleQuery.isLoading]);
 
   useEffect(() => {
     if (
@@ -185,14 +228,17 @@ function App() {
   }, [sendForm.source, sendSources]);
 
   async function ensureArbitrum() {
+    if (signerKind === "private-key") {
+      return;
+    }
     if (chainId !== primaryChain.id) {
       await switchChainAsync({ chainId: primaryChain.id });
     }
   }
 
   async function runAction(name: string, task: () => Promise<string>) {
-    if (!address || !walletClient) {
-      setNotice({ kind: "error", text: "Connect a wallet first." });
+    if (!activeAddress || !activeSigner) {
+      setNotice({ kind: "error", text: "Connect a wallet or import a private key first." });
       return;
     }
     if (!canSignForViewedAddress) {
@@ -232,20 +278,20 @@ function App() {
   }
 
   function useConnectedWalletAddress() {
-    if (!address) {
-      setNotice({ kind: "error", text: "Connect a wallet first." });
+    if (!activeAddress) {
+      setNotice({ kind: "error", text: "Connect a wallet or import a private key first." });
       return;
     }
 
     setNotice(null);
-    setLookupAddress(address);
-    setViewAddress(address);
+    setLookupAddress(activeAddress);
+    setViewAddress(activeAddress);
     setActiveTab("wallet");
   }
 
   function useAgentMasterAddress() {
-    if (!address) {
-      setNotice({ kind: "error", text: "Connect a wallet first." });
+    if (!activeAddress) {
+      setNotice({ kind: "error", text: "Connect a wallet or import a private key first." });
       return;
     }
     if (agentRoleQuery.isLoading) {
@@ -265,6 +311,49 @@ function App() {
     setActiveTab("agent");
   }
 
+  function submitImportPrivateKey() {
+    const normalizedKey = normalizePrivateKey(privateKeyInput);
+
+    if (!normalizedKey) {
+      setNotice({ kind: "error", text: "Enter a valid private key." });
+      return;
+    }
+
+    try {
+      const account = privateKeyToAccount(normalizedKey);
+      setImportedAccount(account);
+      setPrivateKeyInput("");
+      setNotice(null);
+      if (activeTab === "readonly") {
+        setActiveTab("wallet");
+      }
+      if (activeTab !== "agent") {
+        setLookupAddress(account.address);
+        setViewAddress(account.address);
+      }
+    } catch {
+      setNotice({ kind: "error", text: "Enter a valid private key." });
+    }
+  }
+
+  function disconnectActiveSigner() {
+    if (importedAccount) {
+      setImportedAccount(null);
+      setPrivateKeyInput("");
+      setViewAddress(null);
+      setLookupAddress("");
+      setActiveTab("readonly");
+      setNotice(null);
+      return;
+    }
+
+    disconnect();
+    setViewAddress(null);
+    setLookupAddress("");
+    setActiveTab("readonly");
+    setNotice(null);
+  }
+
   async function submitClassTransfer() {
     if (!isManualMode) {
       setNotice({
@@ -279,7 +368,7 @@ function App() {
     }
 
     await runAction("class-transfer", async () => {
-      const client = createHyperWalletClient(walletClient!);
+      const client = createHyperWalletClient(activeSigner!);
       await client.usdClassTransfer({
         amount: transferForm.amount,
         toPerp: transferForm.direction === "spot-to-perp",
@@ -300,7 +389,7 @@ function App() {
     }
 
     await runAction("send", async () => {
-      const client = createHyperWalletClient(walletClient!);
+      const client = createHyperWalletClient(activeSigner!);
       const source = sendSources.find((item) => item.value === sendForm.source);
 
       if (!source) {
@@ -311,7 +400,7 @@ function App() {
         if (!source.tokenKey) {
           throw new Error("Select an asset to send.");
         }
-        await sendUnifiedAsset(walletClient!, {
+        await sendUnifiedAsset(activeSigner!, {
           destination: sendForm.destination as `0x${string}`,
           token: source.tokenKey,
           amount: sendForm.amount,
@@ -343,16 +432,16 @@ function App() {
         throw new Error("Select an account first.");
       }
       if (nextType === "manual") {
-        await disableUnifiedAccountMode(walletClient!, viewAddress);
+        await disableUnifiedAccountMode(activeSigner!, viewAddress);
         return "Manual account activation submitted.";
       }
 
       if (nextType === "portfolio") {
-        await activatePortfolioMarginMode(walletClient!, viewAddress);
+        await activatePortfolioMarginMode(activeSigner!, viewAddress);
         return "Portfolio Margin activation submitted.";
       }
 
-      await activateUnifiedAccountMode(walletClient!, viewAddress);
+      await activateUnifiedAccountMode(activeSigner!, viewAddress);
       return "Unified Account activation submitted.";
     });
   }
@@ -379,7 +468,7 @@ function App() {
         abi: erc20TransferAbi,
         functionName: "transfer",
         args: [HYPERLIQUID_BRIDGE2, parseUnits(depositForm.amount, 6)],
-        account: address!,
+        account: browserAddress!,
         chain: primaryChain,
       });
       setDepositForm({ amount: "" });
@@ -396,7 +485,7 @@ function App() {
     }
 
     await runAction("approve-agent", async () => {
-      const client = createHyperWalletClient(walletClient!);
+      const client = createHyperWalletClient(activeSigner!);
       await client.approveAgent({
         agentAddress: agentAddress as `0x${string}`,
       });
@@ -419,7 +508,7 @@ function App() {
     }
 
     await runAction("withdraw", async () => {
-      const client = createHyperWalletClient(walletClient!);
+      const client = createHyperWalletClient(activeSigner!);
       const sourceDex = getWithdrawSourceDex(accountType);
 
       if (selectedWithdrawChain.kind === "bridge") {
@@ -428,7 +517,7 @@ function App() {
           amount: withdrawForm.amount,
         });
       } else if (selectedWithdrawChain.kind === "cctp") {
-        await withdrawToEvmWithData(walletClient!, {
+        await withdrawToEvmWithData(activeSigner!, {
           destination: withdrawForm.destination as `0x${string}`,
           amount: withdrawForm.amount,
           sourceDex,
@@ -436,7 +525,7 @@ function App() {
           signatureChainId: selectedWithdrawChain.signatureChainId!,
         });
       } else {
-        await withdrawToHyperEvm(walletClient!, {
+        await withdrawToHyperEvm(activeSigner!, {
           amount: withdrawForm.amount,
           sourceDex,
         });
@@ -457,36 +546,38 @@ function App() {
           <p className="eyebrow">HyperCore Portfolio</p>
           <h1>Manage Hyperliquid balances</h1>
         </div>
-        {isConnected ? (
+        {activeAddress ? (
           <div className="wallet-pill">
-            <span>{shortAddress(address)}</span>
+            <span>
+              {shortAddress(activeAddress)}
+              {signerKind === "private-key" ? " Imported" : ""}
+            </span>
             <button
               type="button"
               className="icon-button"
               aria-label="Copy address"
-              onClick={() => address && navigator.clipboard.writeText(address)}
+              onClick={() => navigator.clipboard.writeText(activeAddress)}
             >
               <Copy size={16} />
             </button>
             <button
               type="button"
               className="icon-button"
-              aria-label="Disconnect wallet"
-              onClick={() => disconnect()}
+              aria-label="Disconnect signer"
+              onClick={disconnectActiveSigner}
             >
               <LogOut size={16} />
             </button>
           </div>
         ) : (
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={!hasWalletConnect}
-            onClick={() => open({ view: "Connect" })}
-          >
-            <Wallet size={16} />
-            Connect Wallet
-          </button>
+          <SignerAccess
+            privateKeyInput={privateKeyInput}
+            onPrivateKeyInputChange={setPrivateKeyInput}
+            onImportPrivateKey={submitImportPrivateKey}
+            onConnectWallet={() => open({ view: "Connect" })}
+            canConnectWallet={hasWalletConnect}
+            compact
+          />
         )}
       </header>
 
@@ -502,16 +593,29 @@ function App() {
           <button
             type="button"
             className={activeTab === "wallet" ? "active" : ""}
-            disabled={!address}
-            onClick={useConnectedWalletAddress}
+            onClick={() => {
+              setActiveTab("wallet");
+              if (activeAddress) {
+                setLookupAddress(activeAddress);
+                setViewAddress(activeAddress);
+              }
+            }}
           >
             My wallet
           </button>
           <button
             type="button"
             className={activeTab === "agent" ? "active" : ""}
-            disabled={!address || agentRoleQuery.isLoading || !agentMasterAddress}
-            onClick={useAgentMasterAddress}
+            onClick={() => {
+              setActiveTab("agent");
+              if (agentMasterAddress) {
+                setLookupAddress(agentMasterAddress);
+                setViewAddress(agentMasterAddress);
+              } else {
+                setLookupAddress("");
+                setViewAddress(null);
+              }
+            }}
           >
             Authorized master
           </button>
@@ -546,12 +650,16 @@ function App() {
 
         {activeTab === "wallet" ? (
           <div className="wallet-tab-panel">
-            {address ? (
+            {activeAddress ? (
               <>
                 <div className="wallet-tab-row">
                   <div>
-                    <p className="eyebrow">Connected wallet</p>
-                    <strong>{shortAddress(address)}</strong>
+                    <p className="eyebrow">
+                      {signerKind === "private-key"
+                        ? "Imported wallet"
+                        : "Connected wallet"}
+                    </p>
+                    <strong>{shortAddress(activeAddress)}</strong>
                   </div>
                   <button
                     type="button"
@@ -587,45 +695,54 @@ function App() {
                 </p>
               </>
             ) : (
-              <button
-                type="button"
-                className="primary-button"
-                disabled={!hasWalletConnect}
-                onClick={() => open({ view: "Connect" })}
-              >
-                <Wallet size={16} />
-                Connect Wallet
-              </button>
+              <SignerAccess
+                privateKeyInput={privateKeyInput}
+                onPrivateKeyInputChange={setPrivateKeyInput}
+                onImportPrivateKey={submitImportPrivateKey}
+                onConnectWallet={() => open({ view: "Connect" })}
+                canConnectWallet={hasWalletConnect}
+              />
             )}
           </div>
         ) : null}
 
         {activeTab === "agent" ? (
-          <div className="tab-panel info-panel">
-            <div>
-              <p className="eyebrow">Authorized master wallet</p>
-              <strong>
-                {agentMasterAddress
-                  ? shortAddress(agentMasterAddress)
-                  : agentRoleQuery.isLoading
-                    ? "Checking..."
-                    : "No authorized master found"}
-              </strong>
-              {agentMasterAddress ? (
-                <p className="hint">
-                  Actions are signed by {shortAddress(address)} as Agent Wallet.
-                </p>
-              ) : null}
+          activeAddress ? (
+            <div className="tab-panel info-panel">
+              <div>
+                <p className="eyebrow">Authorized master wallet</p>
+                <strong>
+                  {agentMasterAddress
+                    ? shortAddress(agentMasterAddress)
+                    : agentRoleQuery.isLoading
+                      ? "Checking..."
+                      : "No authorized master found"}
+                </strong>
+                {agentMasterAddress ? (
+                  <p className="hint">
+                    Actions are signed by {shortAddress(activeAddress)} as
+                    Agent Wallet.
+                  </p>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={!agentMasterAddress}
+                onClick={useAgentMasterAddress}
+              >
+                View master wallet
+              </button>
             </div>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={!agentMasterAddress}
-              onClick={useAgentMasterAddress}
-            >
-              View master wallet
-            </button>
-          </div>
+          ) : (
+            <SignerAccess
+              privateKeyInput={privateKeyInput}
+              onPrivateKeyInputChange={setPrivateKeyInput}
+              onImportPrivateKey={submitImportPrivateKey}
+              onConnectWallet={() => open({ view: "Connect" })}
+              canConnectWallet={hasWalletConnect}
+            />
+          )
         ) : null}
       </section>
 
@@ -634,27 +751,20 @@ function App() {
       ) : null}
 
       {!viewAddress ? (
-        <section className="connect-shell">
-          <div className="connect-action">
-            <button
-              type="button"
-              className="primary-button connect-wallet-button"
-              disabled={!hasWalletConnect}
-              onClick={() => open({ view: "Connect" })}
-            >
-              <Wallet size={18} />
-              Connect Wallet
-            </button>
-            <p className="hint">
-              Or enter any wallet address above to view a read-only portfolio.
-            </p>
-            {!hasWalletConnect ? (
+        activeTab === "readonly" ? (
+          <section className="connect-shell">
+            <div className="connect-action">
               <p className="hint">
-                Add `VITE_REOWN_PROJECT_ID` to enable wallet connections.
+                Enter any wallet address above to view a read-only portfolio.
               </p>
-            ) : null}
-          </div>
-        </section>
+              {!hasWalletConnect ? (
+                <p className="hint">
+                  Add `VITE_REOWN_PROJECT_ID` to enable wallet connections.
+                </p>
+              ) : null}
+            </div>
+          </section>
+        ) : null
       ) : (
         <>
           <section
@@ -703,7 +813,7 @@ function App() {
                 Viewing {shortAddress(viewAddress)}
                 {canOperateCurrentView
                   ? activeTab === "agent"
-                    ? ` with Agent signing from ${shortAddress(address)}.`
+                    ? ` with Agent signing from ${shortAddress(activeAddress ?? undefined)}.`
                     : " with signing enabled."
                   : " in read-only mode."}
               </p>
@@ -1014,6 +1124,56 @@ function ActionPanel({
   );
 }
 
+function SignerAccess({
+  privateKeyInput,
+  onPrivateKeyInputChange,
+  onImportPrivateKey,
+  onConnectWallet,
+  canConnectWallet,
+  compact = false,
+}: {
+  privateKeyInput: string;
+  onPrivateKeyInputChange: (value: string) => void;
+  onImportPrivateKey: () => void;
+  onConnectWallet: () => void;
+  canConnectWallet: boolean;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`signer-access ${compact ? "compact" : ""}`}>
+      <button
+        type="button"
+        className="primary-button"
+        disabled={!canConnectWallet}
+        onClick={onConnectWallet}
+      >
+        <Wallet size={16} />
+        Connect Wallet
+      </button>
+      <div className="private-key-form">
+        <input
+          type="password"
+          value={privateKeyInput}
+          placeholder="Import private key"
+          onChange={(event) => onPrivateKeyInputChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              onImportPrivateKey();
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={onImportPrivateKey}
+        >
+          Import Key
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="metric">
@@ -1306,6 +1466,14 @@ function shortAddress(value?: string) {
 
 function shortHash(value: string) {
   return `${value.slice(0, 10)}...${value.slice(-6)}`;
+}
+
+function normalizePrivateKey(value: string): `0x${string}` | null {
+  const trimmed = value.trim();
+  const normalized = trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`;
+  return PRIVATE_KEY_PATTERN.test(normalized)
+    ? (normalized as `0x${string}`)
+    : null;
 }
 
 function getErrorMessage(error: unknown) {
